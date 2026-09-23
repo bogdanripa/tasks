@@ -77,7 +77,8 @@ Each agent can have its own routine at claude.ai/code/routines with a **Call via
 - **Queue:**
   - One run at a time per agent, taking the oldest pending update first. Updates that arrive meanwhile wait in the queue; none are dropped.
   - Quiet period: an agent is pinged only once nobody has touched the item for `AGENT_QUIET_SECONDS` (default 120). Every change restarts the timer, so a human can finish editing and the agent gets all of it in one run. This applies to webhooks too.
-  - A run ends when it sets its task's status, or after 20 minutes without API activity.
+  - The agent's first step is moving the task to the board's in-progress column ("In progress", "Doing", "WIP" or "Working"); the payload names the column. That move doesn't end the run.
+  - A run ends when it sets its task to any other status, or after 20 minutes without API activity.
 - **Limits:**
   - A `429` from Anthropic pauses every routine in the org until `Retry-After`. Queued updates wait.
   - At most 10 runs per agent per task per hour, which guards against two agents pinging each other forever. Beyond that, updates wait for the window.

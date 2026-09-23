@@ -396,6 +396,9 @@ export async function listProjects(actor: Actor) {
 
 const doneColumn = (p: Row) => p.columns[p.columns.length - 1] as string;
 
+/** The board's "work is happening" column, if it has one ("In progress", "Doing", "WIP", "Working"). */
+export const workingColumn = (columns: string[]) => columns.find((c) => /^(in[ -]?progress|doing|wip|working)$/i.test(c.trim()));
+
 export async function listItems(project: Row, f: { status?: string; type?: ItemType; assigneeId?: string; open?: boolean } = {}) {
   return sql`
     select v.id, v.ref, v.number, v.type, v.title, v.status, v.position, v.assignee_id, v.assignee_name, v.assignee_kind,
@@ -554,7 +557,8 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     });
     if (changes.assignee && assignee) await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
     // A routine run's last step is setting its task's status: that ends the run and lets the agent's queue move.
-    if (changes.status && actor.keyId) await finishRun(tx, actor.id, actor.keyId, item.id);
+    // Moving into the working column is "started", not "finished", so it doesn't end the run.
+    if (changes.status && actor.keyId && status !== workingColumn(project.columns)) await finishRun(tx, actor.id, actor.keyId, item.id);
 
     // Any change by someone else reaches the assignee (for a routine agent, that fires a run).
     await notify(tx, item.assigneeId, ev, item.id, changes.status ? 'status_changed' : 'updated', actor);

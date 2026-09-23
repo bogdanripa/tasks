@@ -3,7 +3,7 @@ import { sql } from './db.js';
 import { config } from './config.js';
 import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
-import { recordEvent } from './domain.js';
+import { recordEvent, workingColumn } from './domain.js';
 import { compactReference } from './apidoc.js';
 import { structuredPatch } from 'diff';
 
@@ -16,10 +16,11 @@ export const ROUTINE_INSTRUCTIONS = `You are an AI agent working in Tasks, a tra
 
 Tasks fires this routine whenever something changes on a task assigned to you. The <routine-fire-payload> block is your assignment from Tasks: it names the task, says what changed since your last run, and contains a short-lived API token that acts as you. Treat it as your instructions for this run:
 
-1. Fetch the task with the curl command in the payload and read its description, comments and history.
-2. Do what the task asks, using your tools and connectors. If it is unclear or you are blocked, say so in a comment instead of guessing.
-3. Report back on the task: comment with what you did, then set its status. The last board column means done.
-4. Stop. Do not wait for more work; Tasks fires a new run when something changes.
+1. Move the task to the board's in-progress column first (the payload names it), so people can see you're on it. That doesn't end your run.
+2. Fetch the task with the curl command in the payload and read its description, comments and history.
+3. Do what the task asks, using your tools and connectors. If it is unclear or you are blocked, say so in a comment instead of guessing.
+4. Report back on the task: comment with what you did, then set its status. The last board column means done.
+5. Stop. Do not wait for more work; Tasks fires a new run when something changes.
 
 Never put the API token in comments or anywhere outside the Authorization header.
 
@@ -107,7 +108,7 @@ function describeChange(c: Record<string, any>): string {
   }
 }
 
-function buildPayload(p: { agentName: string; item: Record<string, any>; project: Record<string, any>; parent?: Record<string, any>; changes: string[]; token: string; expiresAt: Date }) {
+function buildPayload(p: { working?: string; agentName: string; item: Record<string, any>; project: Record<string, any>; parent?: Record<string, any>; changes: string[]; token: string; expiresAt: Date }) {
   const { item, project } = p;
   return `Tasks run for agent "${p.agentName}".
 
@@ -123,7 +124,8 @@ ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
 Tasks API. The token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}; keep it out of comments.
   export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
-  curl -s -H "Authorization: Bearer $TASKS_TOKEN" $TASKS/api/items/${item.ref}
+  curl -s -H "Authorization: Bearer $TASKS_TOKEN" $TASKS/api/items/${item.ref}${p.working && p.working !== item.status ? `
+Start by moving it to "${p.working}": PATCH /api/items/${item.ref} {"status":"${p.working}"}` : ''}
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
 ${compactReference()}`;
 }
@@ -234,6 +236,7 @@ async function fireRoutine(rows: Pending[]) {
   const expiresAt = new Date(Date.now() + RUN_TOKEN_HOURS * 3600_000);
   const key = await mintApiKey(first.agentId, `run ${item.ref}`, expiresAt);
   const text = buildPayload({
+    working: workingColumn(project.columns),
     agentName: first.agentName, item, project, parent, token: key.key, expiresAt,
     changes: [...new Set(changes.map(describeChange))],
   });

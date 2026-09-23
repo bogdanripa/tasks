@@ -175,7 +175,16 @@ assert.equal(skipped.length, 2);
 await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Todo' });
 await waitFor(() => fires.length === 1, 'run once the item leaves Backlog');
 assert.match(fires[0].text, /moved it from Backlog to Todo/);
-await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Done' }, tokenOf(fires[0].text));
+// The payload tells the agent to move it to the working column first; doing so doesn't end the run.
+assert.match(fires[0].text, /Start by moving it to "In progress": PATCH \/api\/items\/\S+ \{"status":"In progress"\}/);
+await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'In progress' }, tokenOf(fires[0].text));
+await api('POST', `/api/comments/${parkedTask.ref}`, { body: 'while you are at it: check cron.d too' });
+await new Promise((r) => setTimeout(r, 2000));
+assert.equal(fires.length, 1, 'moving to In progress did not end the run, so the comment waits');
+await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Done' }, tokenOf(fires[0].text)); // ends the run
+await waitFor(() => fires.length === 2, 'queued comment runs after the first run ends');
+assert.match(fires[1].text, /check cron\.d too/);
+await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Review' }, tokenOf(fires[1].text));
 fires.length = 0;
 console.log('✓ Backlog items don\'t ping agents; moving one out starts a run');
 
