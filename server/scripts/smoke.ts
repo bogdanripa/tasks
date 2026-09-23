@@ -132,6 +132,7 @@ await assert.rejects(api('DELETE', `/api/links/${trig.id}`), /permanent/);
 // ---- Routine agents: one run at a time, queued updates, 429 pause, run token, run finishes on status ----
 const fires: { auth: string; beta: string; text: string }[] = [];
 let respond429 = 0;
+let respond500 = 0;
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -139,6 +140,11 @@ const fake = http.createServer((req, res) => {
     // Only this run's routine: leftovers from earlier (crashed) runs must not count.
     if (req.url !== `/v1/claude_code/routines/trig_${run}/fire`) {
       res.writeHead(404);
+      return res.end();
+    }
+    if (respond500 > 0) {
+      respond500--;
+      res.writeHead(500);
       return res.end();
     }
     if (respond429 > 0) {
@@ -244,6 +250,19 @@ assert.match(fires[4].text, /END-OF-COMMENT/, 'full comment, not the excerpt');
 const history = await api('GET', `/api/items/${r2.ref}`);
 assert.ok(history.history.every((e: any) => !e.data.changes?.body || e.data.changes.body[0] === null), 'history omits description text');
 console.log('✓ edits reach the run with before/after: title, description diff, full comment');
+
+// A run takes every pending update on its item, even ones on a different timer (e.g. a failed attempt's backoff).
+await api('PATCH', `/api/items/${r2.ref}`, { status: 'Review' }, tokenOf(fires[4].text)); // ends run 5
+respond500 = 1;
+await api('POST', `/api/comments/${r2.ref}`, { body: 'first (its fire fails once)' });
+await waitFor(() => respond500 === 0, 'failed attempt');
+await api('POST', `/api/comments/${r2.ref}`, { body: 'second (new quiet timer)' });
+await waitFor(() => fires.length === 6, 'one run after the failure');
+assert.match(fires[5].text, /first \(its fire fails once\)/);
+assert.match(fires[5].text, /second \(new quiet timer\)/);
+await new Promise((r) => setTimeout(r, 1500));
+assert.equal(fires.length, 6, 'no second run for the leftover update');
+console.log('✓ a run takes all pending updates on its item');
 
 // Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);

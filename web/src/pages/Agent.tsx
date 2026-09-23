@@ -176,13 +176,13 @@ export default function AgentPage() {
         <h2>Recent notifications</h2>
         {deliveries.length === 0 && <p className="muted">None yet.</p>}
         <ul className="rows">
-          {deliveries.map((n: any) => (
-            <li key={n.id}>
-              <span>{n.reason.replace(/_/g, ' ')}</span>
-              {n.itemRef && <RefLink refStr={n.itemRef} />}
-              <DeliveryState n={n} mode={current} />
-              <span className="muted small">{n.readAt ? 'read' : 'unread'}</span>
-              <Time iso={n.createdAt} />
+          {groupDeliveries(deliveries, current).map((g) => (
+            <li key={g.id}>
+              <span>{g.reasons.join(', ')}</span>
+              {g.itemRef && <RefLink refStr={g.itemRef} />}
+              <DeliveryState n={g} mode={current} />
+              <span className="muted small">{g.readAt ? 'read' : 'unread'}</span>
+              <Time iso={g.createdAt} />
             </li>
           ))}
         </ul>
@@ -213,6 +213,28 @@ export default function AgentPage() {
       )}
     </div>
   );
+}
+
+/**
+ * A routine agent gets one run per item for all its pending updates, so show them as one row:
+ * consecutive notifications on the same item with the same outcome. Webhook pings are one POST each.
+ */
+function groupDeliveries(rows: any[], mode: Mode) {
+  const out: any[] = [];
+  for (const n of rows) {
+    const reason = n.reason.replace(/_/g, ' ');
+    const prev = out[out.length - 1];
+    const same =
+      mode === 'routine' && prev && n.itemRef && prev.itemRef === n.itemRef && prev.deliveryStatus === n.deliveryStatus &&
+      (n.deliveryStatus === 'pending' ? prev.nextAttemptAt === n.nextAttemptAt : prev.lastError === n.lastError);
+    if (same) {
+      if (!prev.reasons.includes(reason)) prev.reasons.push(reason);
+      if (!n.readAt) prev.readAt = null;
+    } else {
+      out.push({ ...n, reasons: [reason] });
+    }
+  }
+  return out;
 }
 
 const SKIP_REASONS: Record<string, string> = {

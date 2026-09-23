@@ -195,7 +195,13 @@ export async function processRoutineQueue(rows: Pending[]) {
       await noteThrottled(group[0], opensAt);
       continue;
     }
-    await fireRoutine(group);
+    // One run covers every pending update on the item, including ones not due yet (e.g. on a retry timer).
+    const extra = await sql`
+      select id, reason, attempts from notifications
+      where account_id = ${agentId} and item_id = ${group[0].itemId} and delivery_status = 'pending'
+        and id not in ${sql(group.map((r) => r.id))}
+      order by id`;
+    await fireRoutine([...group, ...extra.map((e) => ({ ...group[0], id: Number(e.id), reason: e.reason, attempts: e.attempts }))]);
     // This agent's other items stay due; the next pass finds the new run active and defers them.
   }
 }
