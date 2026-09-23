@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Event } from '../api';
-import { Avatar, ErrorNote, EventRow, KindBadge, Modal, RefLink, Time, TypeBadge, linkVerb, useFetch } from '../ui';
+import { Avatar, ErrorNote, EventRow, KindBadge, Markdown, Modal, RefLink, Time, TypeBadge, linkVerb, useFetch } from '../ui';
 
 export default function ItemPage() {
   const { org, ref } = useParams();
@@ -71,22 +71,42 @@ export default function ItemPage() {
           <ErrorNote error={opError} />
 
           <section>
-            <div className="section-head">
-              <h2>Description</h2>
-              {editing !== 'body' && <button className="ghost small" onClick={() => { setDraft(item.body); setEditing('body'); }}>Edit</button>}
-            </div>
+            <h2>Description</h2>
             {editing === 'body' ? (
               <div className="stack">
-                <textarea autoFocus rows={10} value={draft} onChange={(e) => setDraft(e.target.value)} />
+                <textarea
+                  autoFocus
+                  rows={Math.min(Math.max(draft.split('\n').length + 2, 8), 30)}
+                  value={draft}
+                  placeholder="Describe the need or the work. Markdown is supported."
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setEditing(null);
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      setEditing(null);
+                      patch({ body: draft });
+                    }
+                  }}
+                />
                 <div className="actions">
+                  <span className="muted small grow">Markdown supported · ⌘/Ctrl+Enter to save · Esc to cancel</span>
                   <button className="ghost small" onClick={() => setEditing(null)}>Cancel</button>
                   <button className="primary small" onClick={() => { setEditing(null); patch({ body: draft }); }}>Save</button>
                 </div>
               </div>
-            ) : item.body ? (
-              <div className="body">{item.body}</div>
             ) : (
-              <p className="muted">No description.</p>
+              <div
+                className={`body editable ${item.body ? '' : 'empty'}`}
+                title="Click to edit"
+                onClick={(e) => {
+                  // Let links work and text be selected without jumping into the editor.
+                  if ((e.target as HTMLElement).closest('a') || window.getSelection()?.toString()) return;
+                  setDraft(item.body);
+                  setEditing('body');
+                }}
+              >
+                {item.body ? <Markdown>{item.body}</Markdown> : <span className="muted">Add a description…</span>}
+              </div>
             )}
           </section>
 
@@ -159,7 +179,7 @@ export default function ItemPage() {
                     <div>
                       <b>{c.authorName}</b> <KindBadge kind={c.authorKind} /> · <Time iso={c.createdAt} />
                     </div>
-                    <div className="body">{c.body}</div>
+                    <div className="body"><Markdown>{c.body}</Markdown></div>
                   </div>
                 </li>
               ))}

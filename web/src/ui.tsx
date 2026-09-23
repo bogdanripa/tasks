@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { get, itemPath, type Event } from './api';
 
 /** Fetch JSON on mount / when `path` changes. `reload` refetches without clearing. */
@@ -180,6 +182,20 @@ export function CopyField({ value, buttonOnly }: { value: string; buttonOnly?: b
       >
         {copied ? 'Copied' : 'Copy'}
       </button>
+    </div>
+  );
+}
+
+/** GitHub-flavored Markdown. Raw HTML is not rendered, so user content can't inject markup. */
+export function Markdown({ children }: { children: string }) {
+  return (
+    <div className="markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" /> }}
+      >
+        {children}
+      </ReactMarkdown>
     </div>
   );
 }
