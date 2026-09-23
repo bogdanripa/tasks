@@ -116,7 +116,7 @@ export default function OrgPage() {
           title="New project"
           fields={[
             { name: 'name', label: 'Name', placeholder: 'Website' },
-            { name: 'key', label: 'Key', placeholder: 'WEB', hint: 'Prefix for item refs, e.g. WEB-12' },
+            { name: 'key', label: 'Key', placeholder: 'WEB', hint: 'Prefix for item refs, e.g. WEB-12', optional: true, derive: { from: 'name', fn: defaultProjectKey } },
             { name: 'description', label: 'Description', optional: true },
             { name: 'columns', label: 'Columns', optional: true, placeholder: 'Backlog, Todo, In progress, Review, Done', hint: 'Comma-separated. The last column means done.' },
           ]}
@@ -124,7 +124,8 @@ export default function OrgPage() {
           onSubmit={async (v) => {
             await api('POST', `/api/orgs/${org}/projects`, {
               name: v.name,
-              key: v.key.toUpperCase(),
+              // Only send a key the user typed; otherwise the server derives it and avoids collisions.
+              key: v.key && v.key.toUpperCase() !== defaultProjectKey(v.name) ? v.key.toUpperCase() : undefined,
               description: v.description || undefined,
               columns: v.columns ? v.columns.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
             });
@@ -169,7 +170,22 @@ export default function OrgPage() {
   );
 }
 
-type Field = { name: string; label: string; placeholder?: string; hint?: string; optional?: boolean; type?: string };
+type Field = {
+  name: string;
+  label: string;
+  placeholder?: string;
+  hint?: string;
+  optional?: boolean;
+  type?: string;
+  /** Prefill from another field until the user edits this one. */
+  derive?: { from: string; fn: (value: string) => string };
+};
+
+/** Mirrors the server's default: first three letters/digits of the name, uppercased. */
+export function defaultProjectKey(name: string) {
+  const clean = name.normalize('NFD').replace(/[^A-Za-z0-9]/g, '').replace(/^[0-9]+/, '').toUpperCase();
+  return clean.length >= 2 ? clean.slice(0, 3) : '';
+}
 
 export function FormModal(props: {
   title: string;
@@ -181,6 +197,12 @@ export function FormModal(props: {
   onSubmit: (values: Record<string, string>) => Promise<void>;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const change = (name: string, value: string) => {
+    const next = { ...values, [name]: value };
+    for (const f of props.fields) if (f.derive?.from === name && !touched.has(f.name)) next[f.name] = f.derive.fn(value);
+    setValues(next);
+  };
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -202,15 +224,20 @@ export function FormModal(props: {
       >
         {props.fields.map((f, i) => (
           <label key={f.name}>
-            {f.label}
-            {f.optional && <span className="muted"> (optional)</span>}
+            <span>
+              {f.label}
+              {f.optional && !f.derive && <span className="muted"> (optional)</span>}
+            </span>
             <input
               autoFocus={i === 0}
               type={f.type ?? 'text'}
               required={!f.optional}
               placeholder={f.placeholder}
               value={values[f.name] ?? ''}
-              onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
+              onChange={(e) => {
+                if (f.derive) setTouched(new Set(touched).add(f.name));
+                change(f.name, e.target.value);
+              }}
             />
             {f.hint && <span className="hint">{f.hint}</span>}
           </label>

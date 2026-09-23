@@ -50,7 +50,7 @@ export function apiRoutes(app: FastifyInstance) {
   });
   app.post<{ Params: { org: string } }>('/api/orgs/:org/projects', async (req) => {
     const body = z
-      .object({ key: projectKey, name: z.string().min(1).max(80), description: z.string().max(2000).optional(), columns: z.array(z.string().max(40)).max(12).optional() })
+      .object({ key: projectKey.optional(), name: z.string().min(1).max(80), description: z.string().max(2000).optional(), columns: z.array(z.string().max(40)).max(12).optional() })
       .parse(req.body);
     return d.createProject(await requireActor(req), req.params.org, body);
   });

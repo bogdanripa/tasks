@@ -63,6 +63,11 @@ const org = `acme-${run}`;
 await api('POST', '/api/orgs', { slug: org, name: 'Acme' });
 await api('POST', `/api/orgs/${org}/projects`, { key: 'WEB', name: 'Website' });
 await api('POST', `/api/orgs/${org}/projects`, { key: 'API', name: 'Backend' });
+// Keys default to the first three letters of the name, taking the next free variant on collision.
+assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: 'Marketing site' })).key, 'MAR');
+assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: 'Website v2' })).key, 'WEB2');
+assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: '3D renders' })).key, 'DRE');
+console.log('✓ default project keys: MAR, WEB2, DRE');
 
 // Two agents: one with a webhook, one that long-polls via MCP.
 const hooked = await api('POST', `/api/orgs/${org}/agents`, { name: `builder-${run}`, webhookUrl: 'http://localhost:4555/hook' });

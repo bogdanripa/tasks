@@ -277,7 +277,7 @@ function NewTaskModal(props: { parentRef: string; org: string; projectKey: strin
         }}
       >
         <label>Title<input autoFocus required value={title} onChange={(e) => setTitle(e.target.value)} /></label>
-        <label>Details<span className="muted"> (optional)</span><textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+        <label><span>Details<span className="muted"> (optional)</span></span><textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} /></label>
         <label>
           Assign to
           <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
@@ -325,7 +325,7 @@ function TriggerModal({ fromRef, onClose }: { fromRef: string; onClose: () => vo
           </select>
         </label>
         <label>Title<input required value={title} onChange={(e) => setTitle(e.target.value)} /></label>
-        <label>Description<span className="muted"> (optional)</span><textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+        <label><span>Description<span className="muted"> (optional)</span></span><textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} /></label>
         <p className="muted small">The “triggered” link is permanent, so the chain stays traceable.</p>
         <ErrorNote error={error} />
         <div className="actions">

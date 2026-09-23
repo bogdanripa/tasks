@@ -252,9 +252,22 @@ export async function revokeKey(actor: Actor, keyId: string) {
   await sql`update api_keys set revoked_at = now() where id = ${keyId}`;
 }
 
-export async function createProject(actor: Actor, slug: string, input: { key: string; name: string; description?: string; columns?: string[] }) {
+/** Default project key: the first three letters/digits of the name, uppercased ("Website" → "WEB"). */
+export function defaultProjectKey(name: string) {
+  const clean = name.normalize('NFD').replace(/[^A-Za-z0-9]/g, '').replace(/^[0-9]+/, '').toUpperCase();
+  return clean.length >= 2 ? clean.slice(0, 3) : 'PRJ';
+}
+
+export async function createProject(actor: Actor, slug: string, input: { key?: string; name: string; description?: string; columns?: string[] }) {
   const org = await resolveOrg(actor, slug, true);
-  const key = input.key.toUpperCase();
+  let key = input.key?.toUpperCase();
+  if (!key) {
+    // No explicit key: derive one and take the first free variant (WEB, WEB2, WEB3, …).
+    const base = defaultProjectKey(input.name);
+    const taken = new Set((await sql`select key from projects where org_id = ${org.id} and key like ${base + '%'}`).map((r) => r.key));
+    key = base;
+    for (let n = 2; taken.has(key); n++) key = `${base}${n}`;
+  }
   const columns = input.columns?.map((c) => c.trim()).filter(Boolean);
   if (columns && columns.length < 2) throw badRequest('A project needs at least two columns');
   return mutate(async (tx) => {
