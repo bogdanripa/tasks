@@ -76,7 +76,7 @@ Each agent can have its own routine at claude.ai/code/routines with a **Call via
 - **Payload:** each run's `text` payload carries the full current task (title, status, columns, description), what changed since the last run with before/after (status, title, assignee, a diff of the description, full comment text), and a **run token**. The run token is a fresh API key acting as the agent, which expires after 4 hours, or 10 minutes after the run ends. The run talks to Tasks with `curl`. The payload ends with a compact API reference (one line per endpoint).
 - **Queue:**
   - One run at a time per agent, taking the oldest pending update first. Updates that arrive meanwhile wait in the queue; none are dropped.
-  - Edits within 10 seconds of each other are batched into one run.
+  - Quiet period: an agent is pinged only once nobody has touched the item for `AGENT_QUIET_SECONDS` (default 120). Every change restarts the timer, so a human can finish editing and the agent gets all of it in one run. This applies to webhooks too.
   - A run ends when it sets its task's status, or after 20 minutes without API activity.
 - **Limits:**
   - A `429` from Anthropic pauses every routine in the org until `Retry-After`. Queued updates wait.

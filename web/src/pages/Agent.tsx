@@ -232,7 +232,8 @@ function RoutineSetup({ agent, routine, onSaved }: { agent: any; routine: any; o
   return (
     <div className="stack setup">
       <p className="small">
-        Every change to a task assigned to {agent.name} starts a run of its routine, one at a time. The run gets the task and a
+        Changes to a task assigned to {agent.name} start a run of its routine once the task has been quiet for a couple of minutes, one run at a time
+        (tasks in Backlog never do). The run gets the task and a
         short-lived token that acts as {agent.name}, does the work, comments and sets the task’s status.
       </p>
       <ol className="steps small">

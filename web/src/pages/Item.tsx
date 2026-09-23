@@ -208,7 +208,7 @@ export default function ItemPage() {
             <p className="muted small">
               {item.status.toLowerCase() === 'backlog'
                 ? `In Backlog, so ${item.assigneeName} isn’t pinged. Move it out of Backlog to start the agent.`
-                : `${item.assigneeName} is pinged when someone changes this item.`}
+                : `${item.assigneeName} is pinged once this item has been left alone for a couple of minutes after a change.`}
             </p>
           )}
           <div className="side-meta muted small">

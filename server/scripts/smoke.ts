@@ -174,7 +174,12 @@ fires.length = 0;
 console.log('✓ Backlog items don\'t ping agents; moving one out starts a run');
 
 const r1 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Rotate logs', assignee: rAgent.agent.id, status: 'Todo' });
-await api('POST', `/api/comments/${r1.ref}`, { body: 'Keep 7 days please.' }); // same burst → same run
+// Quiet period (1s locally) restarts on each change: edits 0.7s apart, over 2s+, still make one run.
+for (const body of ['Keep 7 days please.', 'Actually, 14 days.', 'And gzip them.']) {
+  await new Promise((r) => setTimeout(r, 700));
+  await api('POST', `/api/comments/${r1.ref}`, { body });
+}
+assert.equal(fires.length, 0, 'no run while the item is still being edited');
 await waitFor(() => fires.length === 1, 'first routine fire');
 await new Promise((r) => setTimeout(r, 1500));
 assert.equal(fires.length, 1, 'burst of updates is one run');
@@ -183,6 +188,7 @@ assert.equal(fires[0].beta, 'experimental-cc-routine-2026-04-01');
 assert.match(fires[0].text, new RegExp(`Task: ${r1.ref}`));
 assert.match(fires[0].text, /assigned it to you/);
 assert.match(fires[0].text, /Keep 7 days please/);
+assert.match(fires[0].text, /And gzip them/);
 assert.match(fires[0].text, /PATCH \/api\/items\/\{ref\} \{title\?,body\?,status\?,assignee\?,position\?\}/, 'compact API reference');
 const run1 = tokenOf(fires[0].text);
 console.log('✓ routine fired once for a burst (assign + comment), with task context');

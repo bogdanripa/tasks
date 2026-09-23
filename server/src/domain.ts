@@ -114,15 +114,22 @@ async function emit(tx: Db, e: EventInput): Promise<number> {
 
 async function notify(tx: Db, accountId: string | null | undefined, eventId: number, itemId: string | null, reason: string, actor: Actor) {
   if (!accountId || accountId === actor.id) return;
-  await tx`
+  const quiet = `${config.agentQuietSeconds} seconds`;
+  const [row] = await tx`
     insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
     select a.id, ${eventId}, ${itemId}, ${reason},
            case when a.routine_url is not null or a.webhook_url is not null then 'pending' end,
-           case when a.routine_url is not null then now() + ${config.routineDebounceSeconds + ' seconds'}::interval /* a burst of edits becomes one run */
-                when a.webhook_url is not null then now() end
+           case when a.routine_url is not null or a.webhook_url is not null then now() + ${quiet}::interval end
     from accounts a
     where a.id = ${accountId}
-      and not exists (select 1 from notifications n where n.account_id = a.id and n.event_id = ${eventId})`;
+      and not exists (select 1 from notifications n where n.account_id = a.id and n.event_id = ${eventId})
+    returning delivery_status`;
+  // Quiet period restarts on every change: pushes for this item wait until nobody has touched it for a while.
+  if (row?.deliveryStatus === 'pending' && itemId) {
+    await tx`
+      update notifications set next_attempt_at = greatest(next_attempt_at, now() + ${quiet}::interval)
+      where account_id = ${accountId} and item_id = ${itemId} and delivery_status = 'pending'`;
+  }
 }
 
 // ---------- orgs, members, agents, projects ----------
