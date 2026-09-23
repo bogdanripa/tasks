@@ -515,7 +515,8 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     const assignee = patch.assignee ? await resolveMember(item.orgId, patch.assignee, tx) : patch.assignee === null ? null : undefined;
     const changes: Record<string, [unknown, unknown]> = {};
     if (patch.title !== undefined && patch.title.trim() !== item.title) changes.title = [item.title, patch.title.trim()];
-    if (patch.body !== undefined && patch.body !== item.body) changes.body = [null, null]; // bodies are long; record that it changed
+    // Full before/after, so a routine run can be shown what changed. Stripped from history/timeline responses.
+    if (patch.body !== undefined && patch.body !== item.body) changes.body = [item.body, patch.body];
     if (patch.status !== undefined && patch.status !== item.status) changes.status = [item.status, patch.status];
     if (assignee !== undefined && (assignee?.id ?? null) !== item.assigneeId) changes.assignee = [item.assigneeName, assignee?.name ?? null];
     const moved = patch.position !== undefined && patch.position !== item.position;
@@ -598,8 +599,10 @@ export async function addComment(actor: Actor, ref: string, body: string) {
   });
 }
 
+// Description edits store the full before/after text; history and timelines only need to know it changed.
 const eventCols = sql`
-  e.id, e.type, e.data, e.created_at, e.item_id,
+  e.id, e.type, e.created_at, e.item_id,
+  case when e.data->'changes' ? 'body' then jsonb_set(e.data, '{changes,body}', '[null, null]') else e.data end as data,
   a.id as actor_id, a.name as actor_name, a.kind as actor_kind, a.avatar_url as actor_avatar`;
 
 export async function itemDetail(actor: Actor, ref: string) {

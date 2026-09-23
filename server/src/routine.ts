@@ -5,6 +5,7 @@ import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
 import { recordEvent } from './domain.js';
 import { compactReference } from './apidoc.js';
+import { structuredPatch } from 'diff';
 
 const RUN_TOKEN_HOURS = 4;
 const MAX_RUNS_PER_ITEM_PER_HOUR = 10; // stops two agents from pinging each other forever
@@ -35,6 +36,7 @@ export type Pending = {
   routineTokenEnc: string;
   itemId: string | null;
   itemAssigneeId: string | null;
+  itemInBacklog: boolean;
 };
 
 /** A run with no API activity for this long is treated as over (crashed, stuck or finished without a status change). */
@@ -42,20 +44,53 @@ const RUN_IDLE_MINUTES = 20;
 const RECHECK_SECONDS = 30;
 const q = (s: string) => `"${s.replace(/\s+/g, ' ').slice(0, 300)}"`;
 
+const MAX_DIFF_LINES = 60;
+
+/** Compact line diff of a description edit: changed lines with one line of context, capped. */
+function describeDiff(before: string, after: string) {
+  const patch = structuredPatch('before', 'after', before.endsWith('\n') ? before : before + '\n', after.endsWith('\n') ? after : after + '\n', '', '', { context: 1 });
+  // Adding a first description (or clearing it) is all + (or all -), not a diff against an empty line.
+  const lines = !before.trim()
+    ? after.split('\n').map((l) => `+${l}`)
+    : !after.trim()
+      ? before.split('\n').map((l) => `-${l}`)
+      : patch.hunks.flatMap((h, i) => [...(i > 0 ? ['  …'] : []), ...h.lines.filter((l) => !l.startsWith('\\'))]);
+  const shown = lines.slice(0, MAX_DIFF_LINES).map((l) => `    ${l}`);
+  if (lines.length > MAX_DIFF_LINES) shown.push(`    … ${lines.length - MAX_DIFF_LINES} more diff lines (the full current description is below)`);
+  return shown.join('\n');
+}
+
+/** Every field an edit touched, with before and after. */
+function describeEdits(who: string, changes: Record<string, [any, any]> = {}) {
+  const parts: string[] = [];
+  if (changes.status) parts.push(`${who} moved it from ${changes.status[0]} to ${changes.status[1]}`);
+  if (changes.title) parts.push(`${who} changed the title from ${q(changes.title[0] ?? '')} to ${q(changes.title[1] ?? '')}`);
+  if (changes.assignee) parts.push(`${who} reassigned it from ${changes.assignee[0] ?? 'nobody'} to ${changes.assignee[1] ?? 'nobody'}`);
+  if (changes.body) {
+    const [before, after] = changes.body;
+    parts.push(
+      typeof before === 'string' && typeof after === 'string'
+        ? `${who} edited the description (- removed, + added):\n${describeDiff(before, after)}`
+        : `${who} edited the description`,
+    );
+  }
+  return parts.length ? parts.join('\n- ') : `${who} updated it`;
+}
+
 function describeChange(c: Record<string, any>): string {
   const d = c.data ?? {};
   const who = c.actorName;
   switch (c.reason) {
     case 'assigned':
       return `${who} assigned it to you`;
-    case 'commented':
-      return `${who} commented: ${q(d.excerpt ?? '')}`;
-    case 'status_changed':
-      return `${who} moved it from ${d.changes?.status?.[0]} to ${d.changes?.status?.[1]}`;
-    case 'updated': {
-      const fields = Object.keys(d.changes ?? {}).map((f) => (f === 'body' ? 'the description' : f));
-      return `${who} changed ${fields.join(', ') || 'it'}`;
+    case 'commented': {
+      // The event keeps an excerpt; runs get the full comment (capped), quoted.
+      const text = (c.commentBody ?? d.excerpt ?? '').slice(0, 4000);
+      return `${who} commented:\n${text.split('\n').map((l: string) => `    > ${l}`).join('\n')}`;
     }
+    case 'status_changed':
+    case 'updated':
+      return describeEdits(who, d.changes);
     case 'task_added':
       return `${who} added task ${d.ref} ${q(d.title ?? '')}`;
     case 'linked':
@@ -138,7 +173,10 @@ export async function processRoutineQueue(rows: Pending[]) {
   for (const [agentId, agentRows] of byAgent) {
     const stale = agentRows.filter((r) => !r.itemId || r.itemAssigneeId !== agentId);
     if (stale.length) await markRows(stale.map((r) => r.id), 'skipped', 'not assigned to this agent'); // stays in the inbox
-    const live = agentRows.filter((r) => !stale.includes(r));
+    // Backlog is parked work: no runs. Moving the item out of Backlog is itself a change, so that starts one.
+    const parked = agentRows.filter((r) => !stale.includes(r) && r.itemInBacklog);
+    if (parked.length) await markRows(parked.map((r) => r.id), 'skipped', 'in backlog');
+    const live = agentRows.filter((r) => !stale.includes(r) && !parked.includes(r));
     if (!live.length) continue;
 
     const busy = await agentBusyUntil(agentId, live[0].agentOrgId);
@@ -182,8 +220,9 @@ async function fireRoutine(rows: Pending[]) {
   const [project] = await sql`select key, columns from projects where id = ${item.projectId}`;
   const [parent] = item.parentId ? await sql`select ref, title from item_view where id = ${item.parentId}` : [];
   const changes = await sql`
-    select n.reason, e.data, a.name as actor_name from notifications n
+    select n.reason, e.data, a.name as actor_name, cm.body as comment_body from notifications n
     join events e on e.id = n.event_id join accounts a on a.id = e.actor_id
+    left join comments cm on cm.id = (e.data->>'commentId')::uuid
     where n.id in ${sql(ids)} order by n.id`;
 
   const expiresAt = new Date(Date.now() + RUN_TOKEN_HOURS * 3600_000);

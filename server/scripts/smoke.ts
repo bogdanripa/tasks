@@ -77,7 +77,7 @@ const poller = await api('POST', `/api/orgs/${org}/agents`, { name: `backend-${r
 // Issue + task assigned to the webhook agent → ping.
 const issue = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Signup page is slow' });
 assert.equal(issue.ref, `${org}/WEB-1`);
-const task = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', title: 'Profile signup page', parent: issue.ref, assignee: hooked.agent.id });
+const task = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', title: 'Profile signup page', parent: issue.ref, assignee: hooked.agent.id, status: 'Todo' });
 await waitFor(() => received.length > 0, 'webhook');
 assert.equal(received[0].reason, 'assigned');
 assert.equal(received[0].item.ref, task.ref);
@@ -159,7 +159,21 @@ await api('PATCH', `/api/agents/${rAgent.agent.id}`, { routineUrl: `http://local
 await assert.rejects(api('PATCH', `/api/agents/${rAgent.agent.id}`, { routineUrl: 'https://evil.example.com/fire' }), /must look like/);
 
 const opsRoot = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Pi housekeeping' });
-const r1 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Rotate logs', assignee: rAgent.agent.id });
+// Backlog is parked: assigning there doesn't start a run; moving it out does.
+const parkedTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Someday: tidy crontab', assignee: rAgent.agent.id });
+await api('POST', `/api/comments/${parkedTask.ref}`, { body: 'no rush' });
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(fires.length, 0, 'no run for an item in Backlog');
+const skipped = (await api('GET', `/api/agents/${rAgent.agent.id}`)).deliveries.filter((n: any) => n.lastError === 'in backlog');
+assert.equal(skipped.length, 2);
+await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Todo' });
+await waitFor(() => fires.length === 1, 'run once the item leaves Backlog');
+assert.match(fires[0].text, /moved it from Backlog to Todo/);
+await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Done' }, tokenOf(fires[0].text));
+fires.length = 0;
+console.log('✓ Backlog items don\'t ping agents; moving one out starts a run');
+
+const r1 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Rotate logs', assignee: rAgent.agent.id, status: 'Todo' });
 await api('POST', `/api/comments/${r1.ref}`, { body: 'Keep 7 days please.' }); // same burst → same run
 await waitFor(() => fires.length === 1, 'first routine fire');
 await new Promise((r) => setTimeout(r, 1500));
@@ -174,7 +188,7 @@ const run1 = tokenOf(fires[0].text);
 console.log('✓ routine fired once for a burst (assign + comment), with task context');
 
 // While the run is active, more updates queue up instead of firing.
-const r2 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Renew certs', assignee: rAgent.agent.id });
+const r2 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Renew certs', assignee: rAgent.agent.id, status: 'Todo' });
 await api('POST', `/api/comments/${r1.ref}`, { body: 'Also compress them.' });
 await new Promise((r) => setTimeout(r, 2500));
 assert.equal(fires.length, 1, 'no second run while the first is active');
@@ -209,6 +223,21 @@ assert.ok(paused.pause, 'org paused after 429');
 await waitFor(() => fires.length === 4, 'fire after the pause');
 assert.match(fires[3].text, /certs for the API too/);
 console.log('✓ 429 pauses routines until Retry-After, then the queued run fires');
+
+// Edits reach the run with before/after: title change, description diff, full comment text.
+await api('PATCH', `/api/items/${r2.ref}`, { body: 'Step 1: back up\nStep 2: use certbot\nStep 3: reload nginx' }); // queued: run 4 is active
+await api('PATCH', `/api/items/${r2.ref}`, { title: 'Renew TLS certs', body: 'Step 1: back up\nStep 2: use acme.sh\nStep 3: reload nginx' });
+const longComment = 'Please note:\n' + 'x'.repeat(600) + '\nEND-OF-COMMENT';
+await api('POST', `/api/comments/${r2.ref}`, { body: longComment });
+await api('PATCH', `/api/items/${r2.ref}`, { status: 'Done' }, tokenOf(fires[3].text)); // run 4 ends; queue moves
+await waitFor(() => fires.length === 5, 'run with the edits');
+assert.match(fires[4].text, /changed the title from "Renew certs" to "Renew TLS certs"/);
+assert.match(fires[4].text, /-Step 2: use certbot\n\s+\+Step 2: use acme\.sh/, 'description diff');
+assert.match(fires[4].text, /added\):\n    \+Step 1: back up/, 'first description: all added, no empty "-" line');
+assert.match(fires[4].text, /END-OF-COMMENT/, 'full comment, not the excerpt');
+const history = await api('GET', `/api/items/${r2.ref}`);
+assert.ok(history.history.every((e: any) => !e.data.changes?.body || e.data.changes.body[0] === null), 'history omits description text');
+console.log('✓ edits reach the run with before/after: title, description diff, full comment');
 
 // Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);

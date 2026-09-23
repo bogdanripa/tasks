@@ -204,7 +204,13 @@ export default function ItemPage() {
               <MemberOptions members={members} />
             </select>
           </label>
-          {item.assigneeKind === 'agent' && <p className="muted small">The agent was pinged when it was assigned.</p>}
+          {item.assigneeKind === 'agent' && (
+            <p className="muted small">
+              {item.status.toLowerCase() === 'backlog'
+                ? `In Backlog, so ${item.assigneeName} isn’t pinged. Move it out of Backlog to start the agent.`
+                : `${item.assigneeName} is pinged when someone changes this item.`}
+            </p>
+          )}
           <div className="side-meta muted small">
             Created <Time iso={item.createdAt} />
             <br />
