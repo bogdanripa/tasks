@@ -96,7 +96,8 @@ export function apiRoutes(app: FastifyInstance) {
     const agent = await d.requireAgentAdmin(await requireActor(req), req.params.id);
     const [deliveries, runs, [queue], [pause]] = await Promise.all([
       sql`
-        select n.id, n.reason, n.delivery_status, n.attempts, n.last_error, n.created_at, n.read_at, n.next_attempt_at, v.ref as item_ref
+        select n.id, n.reason, n.delivery_status, n.attempts, n.last_error, n.created_at, n.read_at, n.next_attempt_at, v.ref as item_ref,
+               coalesce(lower(v.status) = 'backlog', false) as item_in_backlog
         from notifications n left join item_view v on v.id = n.item_id
         where n.account_id = ${agent.id} order by n.id desc limit 30`,
       sql`
@@ -105,8 +106,9 @@ export function apiRoutes(app: FastifyInstance) {
         from agent_runs r left join item_view v on v.id = r.item_id left join api_keys k on k.id = r.key_id
         where r.agent_id = ${agent.id} order by r.created_at desc limit 20`,
       sql`
-        select count(*)::int as updates, count(distinct item_id)::int as items, min(next_attempt_at) as next_at
-        from notifications where account_id = ${agent.id} and delivery_status = 'pending'`,
+        select count(*)::int as updates, count(distinct n.item_id)::int as items, min(n.next_attempt_at) as next_at
+        from notifications n left join item_view v on v.id = n.item_id
+        where n.account_id = ${agent.id} and n.delivery_status = 'pending' and coalesce(lower(v.status), '') <> 'backlog'`,
       sql`select until, reason from routine_pauses where org_id = ${agent.orgId} and until > now()`,
     ]);
     const [{ slug: orgSlug }] = await sql`select slug from orgs where id = ${agent.orgId}`;

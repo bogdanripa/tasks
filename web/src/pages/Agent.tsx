@@ -180,10 +180,7 @@ export default function AgentPage() {
             <li key={n.id}>
               <span>{n.reason.replace(/_/g, ' ')}</span>
               {n.itemRef && <RefLink refStr={n.itemRef} />}
-              <span className={`delivery ${n.deliveryStatus ?? 'inbox'}`} title={n.lastError ?? ''}>
-                {n.deliveryStatus === 'pending' && current === 'routine' ? 'queued' : n.deliveryStatus ?? 'inbox only'}
-                {n.attempts > 1 && ` (${n.attempts} tries)`}
-              </span>
+              <DeliveryState n={n} mode={current} />
               <span className="muted small">{n.readAt ? 'read' : 'unread'}</span>
               <Time iso={n.createdAt} />
             </li>
@@ -215,6 +212,41 @@ export default function AgentPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+const SKIP_REASONS: Record<string, string> = {
+  'in backlog': 'in Backlog',
+  'not assigned to this agent': 'no longer assigned',
+  throttled: 'run limit reached',
+  'agent deleted': 'agent deleted',
+};
+
+/** What happened, or will happen, to one notification's ping. */
+function DeliveryState({ n, mode }: { n: any; mode: Mode }) {
+  const [cls, label] = ((): [string, string] => {
+    switch (n.deliveryStatus) {
+      case 'pending': {
+        if (n.itemInBacklog) return ['', 'in Backlog · won’t ping'];
+        const secs = Math.round((new Date(n.nextAttemptAt).getTime() - Date.now()) / 1000);
+        if (secs <= 0) return ['pending', 'sending…'];
+        const wait = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+        return ['pending', n.attempts > 0 ? `retrying in ${wait}` : `pings in ${wait}`];
+      }
+      case 'delivered':
+        return ['delivered', mode === 'routine' ? 'run started' : 'sent'];
+      case 'skipped':
+        return ['', `skipped · ${SKIP_REASONS[n.lastError] ?? n.lastError ?? 'not sent'}`];
+      case 'failed':
+        return ['failed', n.attempts > 1 ? `failed after ${n.attempts} tries` : 'failed'];
+      default:
+        return ['', 'inbox only'];
+    }
+  })();
+  return (
+    <span className={`delivery ${cls}`} title={n.lastError ?? ''}>
+      {label}
+    </span>
   );
 }
 
