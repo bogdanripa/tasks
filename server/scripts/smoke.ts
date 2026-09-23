@@ -124,11 +124,24 @@ console.log('✓ history', detail.history.length, 'events; API timeline', tl.len
 const trig = detail.links.find((l: any) => l.kind === 'triggered');
 await assert.rejects(api('DELETE', `/api/links/${trig.id}`), /permanent/);
 
+// Deleting an org: owner + typed slug; cascades, cleans up cross-org links, revokes its agents.
+const other = `other-${run}`;
+await api('POST', '/api/orgs', { slug: other, name: 'Other' });
+await api('POST', `/api/orgs/${other}/projects`, { key: 'OPS', name: 'Ops' });
+const opsIssue = await api('POST', `/api/projects/${other}/OPS/items`, { type: 'issue', title: 'Rotate certs', triggeredBy: task.ref });
+assert.equal((await api('GET', `/api/items/${opsIssue.ref}`)).links.length, 1);
+await assert.rejects(api('DELETE', `/api/orgs/${org}`, { confirm: 'nope' }), /to confirm/);
+await assert.rejects(api('DELETE', `/api/orgs/${org}`, { confirm: org }, poller.key.key), /Only an owner/);
+await api('DELETE', `/api/orgs/${org}`, { confirm: org });
+await assert.rejects(api('GET', `/api/orgs/${org}`), /404/);
+assert.equal((await api('GET', `/api/items/${opsIssue.ref}`)).links.length, 0);
+await assert.rejects(mcp(hooked.key.key, 'whoami'), /./);
+console.log('✓ org deletion (owner-only, confirmed, cascades, agents revoked)');
+
 // Isolation: a stranger sees nothing.
 cookie = '';
 await api('POST', '/auth/dev', { email: `mallory-${run}@example.com` });
-await assert.rejects(api('GET', `/api/items/${task.ref}`), /404/);
-await assert.rejects(mcp(poller.key.key, 'get_item', { ref: 'nope/WEB-1' }), /not found/);
+await assert.rejects(api('GET', `/api/items/${opsIssue.ref}`), /404/);
 console.log('✓ org isolation');
 
 hook.close();

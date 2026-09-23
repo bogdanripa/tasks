@@ -39,6 +39,11 @@ export function apiRoutes(app: FastifyInstance) {
     return d.createOrg(await requireActor(req), body);
   });
   app.get<{ Params: { org: string } }>('/api/orgs/:org', async (req) => d.orgDetail(await requireActor(req), req.params.org));
+  app.delete<{ Params: { org: string } }>('/api/orgs/:org', async (req) => {
+    const { confirm } = z.object({ confirm: z.string() }).parse(req.body ?? {});
+    await d.deleteOrg(await requireActor(req), req.params.org, confirm);
+    return { ok: true };
+  });
   app.post<{ Params: { org: string } }>('/api/orgs/:org/invites', async (req) => {
     const body = z.object({ email: z.email(), role: z.enum(['admin', 'member']).default('member') }).parse(req.body);
     return d.inviteMember(await requireActor(req), req.params.org, body.email, body.role);

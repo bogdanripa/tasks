@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
 import { Avatar, ErrorNote, KindBadge, Modal, useFetch } from '../ui';
@@ -9,7 +9,8 @@ export default function OrgPage() {
   const { org } = useParams();
   const { refreshMe } = useSession();
   const { data, error, reload } = useFetch<any>(`/api/orgs/${org}`);
-  const [modal, setModal] = useState<'project' | 'invite' | 'agent' | null>(null);
+  const navigate = useNavigate();
+  const [modal, setModal] = useState<'project' | 'invite' | 'agent' | 'delete' | null>(null);
   const [newAgent, setNewAgent] = useState<any>(null);
 
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
@@ -85,6 +86,31 @@ export default function OrgPage() {
         </section>
       </div>
 
+      {data.org.role === 'owner' && (
+        <section className="danger-zone">
+          <div>
+            <h2>Delete organization</h2>
+            <p className="muted small">Permanently removes every project, item, comment, history entry and agent in {data.org.name}. Links from other organizations’ items to these items are removed too.</p>
+          </div>
+          <button className="danger" onClick={() => setModal('delete')}>Delete…</button>
+        </section>
+      )}
+
+      {modal === 'delete' && (
+        <FormModal
+          title={`Delete ${data.org.name}?`}
+          fields={[{ name: 'confirm', label: `Type "${data.org.slug}" to confirm`, placeholder: data.org.slug }]}
+          submitLabel="Delete permanently"
+          danger
+          note="This cannot be undone. The organization's agents stop working immediately."
+          onClose={() => setModal(null)}
+          onSubmit={async (v) => {
+            await api('DELETE', `/api/orgs/${org}`, { confirm: v.confirm });
+            await refreshMe();
+            navigate('/');
+          }}
+        />
+      )}
       {modal === 'project' && (
         <FormModal
           title="New project"
@@ -150,6 +176,7 @@ export function FormModal(props: {
   fields: Field[];
   submitLabel?: string;
   note?: string;
+  danger?: boolean;
   onClose: () => void;
   onSubmit: (values: Record<string, string>) => Promise<void>;
 }) {
@@ -192,7 +219,7 @@ export function FormModal(props: {
         <ErrorNote error={error} />
         <div className="actions">
           <button type="button" className="ghost" onClick={props.onClose}>Cancel</button>
-          <button className="primary" disabled={busy}>{props.submitLabel ?? 'Create'}</button>
+          <button className={props.danger ? 'danger-solid' : 'primary'} disabled={busy}>{props.submitLabel ?? 'Create'}</button>
         </div>
       </form>
     </Modal>

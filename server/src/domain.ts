@@ -157,6 +157,23 @@ export async function orgDetail(actor: Actor, slug: string) {
   return { org, projects, members, invites };
 }
 
+/**
+ * Owner-only, and the caller must repeat the slug. Cascades to projects, items, comments, links
+ * (including links from other orgs' items), events, invites, memberships and the org's agents.
+ */
+export async function deleteOrg(actor: Actor, slug: string, confirm: string) {
+  const org = await resolveOrg(actor, slug);
+  if (org.role !== 'owner') throw forbidden('Only an owner can delete an organization');
+  if (confirm !== org.slug) throw badRequest(`Type the organization slug "${org.slug}" to confirm`);
+  // Explicit order: the org's agents are referenced (created_by, actor_id, author_id) by rows that a
+  // single cascading delete would only reach after the agents themselves, failing the FK check.
+  await mutate(async (tx) => {
+    await tx`delete from projects where org_id = ${org.id}`;
+    await tx`delete from events where org_id = ${org.id}`;
+    await tx`delete from orgs where id = ${org.id}`;
+  });
+}
+
 export async function inviteMember(actor: Actor, slug: string, email: string, role: 'admin' | 'member') {
   const org = await resolveOrg(actor, slug, true);
   email = email.trim().toLowerCase();
