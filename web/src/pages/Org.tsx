@@ -46,7 +46,6 @@ export default function OrgPage() {
         <div className="cards">
           {data.projects.map((p: any) => (
             <Link key={p.id} to={`/${org}/${p.key}`} className="card project-card">
-              <span className="project-key">{p.key}</span>
               <b>{p.name}</b>
               {p.description && <span className="muted clamp">{p.description}</span>}
               <span className="muted small">{p.openItems} open</span>

@@ -68,10 +68,7 @@ export default function Board() {
             <Link to={`/${org}`}>{orgName}</Link>
             <span className="sep">›</span>
           </nav>
-          <h1 className="with-key">
-            <span className="project-key">{project.key}</span>
-            {project.name}
-          </h1>
+          <h1>{project.name}</h1>
         </div>
         <div className="segmented" role="tablist">
           {(['all', 'issue', 'task'] as Filter[]).map((f) => (

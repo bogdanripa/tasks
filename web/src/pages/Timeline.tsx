@@ -48,14 +48,11 @@ export default function Timeline() {
       <nav className="crumbs">
         <Link to={`/${org}`}>{orgName}</Link>
         <span className="sep">›</span>
-        <Link to={`/${org}/${key}`}>{key} board</Link>
+        <Link to={`/${org}/${key}`}>Board</Link>
         <span className="sep">›</span>
       </nav>
       <div className="page-head">
-        <h1 className="with-key">
-          <span className="project-key">{key}</span>
-          Timeline
-        </h1>
+        <h1>Timeline</h1>
         <div className="segmented">
           {(['all', 'human', 'agent'] as const).map((w) => (
             <button key={w} className={who === w ? 'on' : ''} onClick={() => setWho(w)}>
