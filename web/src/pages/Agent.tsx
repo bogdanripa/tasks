@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { CopyField, ErrorNote, Modal, Time, RefLink, useFetch } from '../ui';
 
@@ -40,6 +40,8 @@ export default function AgentPage() {
   const { data, error, reload } = useFetch<any>(`/api/agents/${id}`);
   const [mode, setMode] = useState<Mode | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   // Queue and runs change while agents work.
   useEffect(() => {
@@ -55,7 +57,29 @@ export default function AgentPage() {
 
   return (
     <div className="page narrow">
-      <h1>{agent.name} <span className="badge agent">agent</span></h1>
+      {renaming === null ? (
+        <h1 onClick={() => setRenaming(agent.name)} title="Click to rename" style={{ cursor: 'text' }}>
+          {agent.name} <span className="badge agent">agent</span>
+        </h1>
+      ) : (
+        <form
+          className="inline-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              await api('PATCH', `/api/agents/${id}`, { name: renaming.trim() });
+              setRenaming(null);
+              reload();
+            } catch (err) {
+              alert((err as Error).message);
+            }
+          }}
+        >
+          <input autoFocus value={renaming} onChange={(e) => setRenaming(e.target.value)} className="title-input" />
+          <button className="primary">Rename</button>
+          <button type="button" className="ghost" onClick={() => setRenaming(null)}>Cancel</button>
+        </form>
+      )}
 
       <section>
         <h2>How this agent gets work</h2>
@@ -165,6 +189,24 @@ export default function AgentPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="danger-zone">
+        <div>
+          <h2>Delete agent</h2>
+          <p className="muted small">Revokes its keys, stops its webhook or routine and unassigns its open items. Its past comments and history stay.</p>
+        </div>
+        <button
+          className="danger"
+          onClick={async () => {
+            if (!confirm(`Delete ${agent.name}? This can't be undone.`)) return;
+            const res = await api('DELETE', `/api/agents/${id}`);
+            alert(`${agent.name} was deleted${res.unassigned ? ` and ${res.unassigned} open item${res.unassigned > 1 ? 's were' : ' was'} unassigned` : ''}.`);
+            navigate(`/${agent.orgSlug}`);
+          }}
+        >
+          Delete…
+        </button>
       </section>
 
       {newKey && (

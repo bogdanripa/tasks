@@ -182,6 +182,74 @@ export async function deleteOrg(actor: Actor, slug: string, confirm: string) {
   });
 }
 
+/** Unassign everything open that `accountId` holds in the org, recording it in each item's history. */
+async function unassignAll(tx: Db, actor: Actor, orgId: string, accountId: string, name: string) {
+  const items = await tx`
+    update items i set assignee_id = null, updated_at = now()
+    from projects p
+    where p.id = i.project_id and p.org_id = ${orgId} and i.assignee_id = ${accountId} and i.closed_at is null
+    returning i.id, i.project_id, i.title, p.key, i.number`;
+  const [org] = await tx`select slug from orgs where id = ${orgId}`;
+  for (const i of items) {
+    await emit(tx, {
+      orgId, projectId: i.projectId, itemId: i.id, actorId: actor.id, type: 'item.updated',
+      data: { ref: `${org.slug}/${i.key}-${i.number}`, title: i.title, changes: { assignee: [name, null] } },
+    });
+  }
+  return items.length;
+}
+
+async function deactivateAgent(tx: Db, actor: Actor, agent: Row) {
+  const unassigned = await unassignAll(tx, actor, agent.orgId, agent.id, agent.name);
+  await tx`delete from memberships where account_id = ${agent.id}`;
+  await tx`update api_keys set revoked_at = now() where account_id = ${agent.id} and revoked_at is null`;
+  await tx`
+    update accounts set deactivated_at = now(), webhook_url = null, routine_url = null, routine_token_enc = null
+    where id = ${agent.id}`;
+  await tx`
+    update notifications set delivery_status = 'skipped', last_error = 'agent deleted'
+    where account_id = ${agent.id} and delivery_status = 'pending'`;
+  await tx`update agent_runs set finished_at = now() where agent_id = ${agent.id} and finished_at is null`;
+  await emit(tx, { orgId: agent.orgId, actorId: actor.id, type: 'agent.deleted', data: { agentId: agent.id, name: agent.name, unassigned } });
+  return { unassigned };
+}
+
+export async function deleteAgent(actor: Actor, agentId: string) {
+  const agent = await requireAgentAdmin(actor, agentId);
+  return mutate((tx) => deactivateAgent(tx, actor, agent));
+}
+
+/**
+ * Remove someone from an org. Admins remove members and agents; only owners remove admins or owners;
+ * anyone may leave; the last owner stays. Their open items in the org are unassigned.
+ */
+export async function removeMember(actor: Actor, slug: string, accountId: string) {
+  const self = accountId === actor.id;
+  const org = await resolveOrg(actor, slug, !self);
+  const [target] = await sql`
+    select a.id, a.kind, a.name, a.org_id, m.role from memberships m join accounts a on a.id = m.account_id
+    where m.org_id = ${org.id} and m.account_id = ${accountId}`;
+  if (!target) throw notFound('Member');
+  if (!self && target.role !== 'member' && org.role !== 'owner') throw forbidden('Only an owner can remove an admin or owner');
+  return mutate(async (tx) => {
+    if (target.role === 'owner') {
+      const [{ n }] = await tx`select count(*)::int as n from memberships where org_id = ${org.id} and role = 'owner'`;
+      if (n <= 1) throw badRequest('An organization needs at least one owner. Make someone else an owner first, or delete the organization.');
+    }
+    if (target.kind === 'agent') return deactivateAgent(tx, actor, target);
+    const unassigned = await unassignAll(tx, actor, org.id, target.id, target.name);
+    await tx`delete from memberships where org_id = ${org.id} and account_id = ${target.id}`;
+    await emit(tx, { orgId: org.id, actorId: actor.id, type: self ? 'member.left' : 'member.removed', data: { accountId: target.id, name: target.name, unassigned } });
+    return { unassigned };
+  });
+}
+
+export async function cancelInvite(actor: Actor, slug: string, email: string) {
+  const org = await resolveOrg(actor, slug, true);
+  const rows = await sql`delete from invites where org_id = ${org.id} and email = ${email.toLowerCase()} returning email`;
+  if (!rows.length) throw notFound('Invite');
+}
+
 export async function inviteMember(actor: Actor, slug: string, email: string, role: 'admin' | 'member') {
   const org = await resolveOrg(actor, slug, true);
   email = email.trim().toLowerCase();
@@ -227,7 +295,7 @@ export async function createAgent(actor: Actor, slug: string, input: { name: str
 
 /** Agents are managed by admins of their home org. */
 export async function requireAgentAdmin(actor: Actor, agentId: string) {
-  const [agent] = await sql`select * from accounts where id = ${agentId} and kind = 'agent'`;
+  const [agent] = await sql`select * from accounts where id = ${agentId} and kind = 'agent' and deactivated_at is null`;
   if (!agent) throw notFound('Agent');
   await requireMember(actor, agent.orgId, sql, true);
   return agent;
@@ -591,6 +659,7 @@ export async function inbox(actor: Actor, opts: { unreadOnly?: boolean; afterId?
     join accounts a on a.id = e.actor_id
     left join item_view v on v.id = n.item_id
     where n.account_id = ${actor.id}
+      and (v.id is null or exists (select 1 from memberships m where m.org_id = v.org_id and m.account_id = ${actor.id}))
       ${opts.unreadOnly ? sql`and n.read_at is null` : sql``}
       ${opts.afterId ? sql`and n.id > ${opts.afterId}` : sql``}
     order by n.id desc limit ${Math.min(opts.limit ?? 50, 200)}`;

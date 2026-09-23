@@ -46,6 +46,13 @@ export function apiRoutes(app: FastifyInstance) {
     await d.deleteOrg(await requireActor(req), req.params.org, confirm);
     return { ok: true };
   });
+  app.delete<{ Params: { org: string; id: string } }>('/api/orgs/:org/members/:id', async (req) =>
+    d.removeMember(await requireActor(req), req.params.org, req.params.id),
+  );
+  app.delete<{ Params: { org: string; email: string } }>('/api/orgs/:org/invites/:email', async (req) => {
+    await d.cancelInvite(await requireActor(req), req.params.org, req.params.email);
+    return { ok: true };
+  });
   app.post<{ Params: { org: string } }>('/api/orgs/:org/invites', async (req) => {
     const body = z.object({ email: z.email(), role: z.enum(['admin', 'member']).default('member') }).parse(req.body);
     return d.inviteMember(await requireActor(req), req.params.org, body.email, body.role);
@@ -77,6 +84,7 @@ export function apiRoutes(app: FastifyInstance) {
       .parse(req.body);
     return d.updateAgent(await requireActor(req), req.params.id, body);
   });
+  app.delete<{ Params: { id: string } }>('/api/agents/:id', async (req) => d.deleteAgent(await requireActor(req), req.params.id));
   app.get<{ Params: { id: string } }>('/api/agents/:id', async (req) => {
     const agent = await d.requireAgentAdmin(await requireActor(req), req.params.id);
     const [deliveries, runs, [queue], [pause]] = await Promise.all([
@@ -94,10 +102,12 @@ export function apiRoutes(app: FastifyInstance) {
         from notifications where account_id = ${agent.id} and delivery_status = 'pending'`,
       sql`select until, reason from routine_pauses where org_id = ${agent.orgId} and until > now()`,
     ]);
+    const [{ slug: orgSlug }] = await sql`select slug from orgs where id = ${agent.orgId}`;
     return {
       agent: {
         id: agent.id,
         name: agent.name,
+        orgSlug,
         webhookUrl: agent.webhookUrl,
         webhookSecret: agent.webhookSecret,
         routineUrl: agent.routineUrl,

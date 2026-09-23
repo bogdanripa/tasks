@@ -213,6 +213,47 @@ console.log('✓ 429 pauses routines until Retry-After, then the queued run fire
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);
 fake.close();
 
+// ---- Members and agents: rename, delete (deactivate), remove people, cancel invites ----
+const aliceCookie = cookie;
+await api('POST', `/api/orgs/${org}/invites`, { email: `bob-${run}@example.com` });
+await api('POST', `/api/orgs/${org}/invites`, { email: `carol-${run}@example.com` });
+cookie = '';
+const bob = await api('POST', '/auth/dev', { email: `bob-${run}@example.com`, name: `Bob ${run}` }).then(() => api('GET', '/api/me'));
+const bobCookie = cookie;
+cookie = aliceCookie;
+const bobTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Bob owns this', assignee: bob.id });
+cookie = bobCookie;
+const aliceId = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.role === 'owner').id;
+await assert.rejects(api('DELETE', `/api/orgs/${org}/members/${aliceId}`), /Requires an org admin/);
+cookie = aliceCookie;
+await assert.rejects(api('DELETE', `/api/orgs/${org}/members/${aliceId}`), /at least one owner/);
+await api('DELETE', `/api/orgs/${org}/invites/carol-${run}@example.com`);
+assert.ok(!(await api('GET', `/api/orgs/${org}`)).invites.some((i: any) => i.email.startsWith('carol')));
+const removed = await api('DELETE', `/api/orgs/${org}/members/${bob.id}`);
+assert.equal(removed.unassigned, 1);
+const bobTaskAfter = await api('GET', `/api/items/${bobTask.ref}`);
+assert.equal(bobTaskAfter.item.assigneeId, null);
+assert.ok(bobTaskAfter.history.some((e: any) => e.type === 'item.updated' && e.data.changes.assignee?.[1] === null));
+cookie = bobCookie;
+await assert.rejects(api('GET', `/api/items/${bobTask.ref}`), /404/);
+assert.ok(!(await api('GET', '/api/inbox')).some((n: any) => n.itemRef === bobTask.ref), 'no items from orgs you left');
+cookie = aliceCookie;
+console.log('✓ member removal: permissions, last owner kept, items unassigned, access and inbox gone; invite cancelled');
+
+const temp = await api('POST', `/api/orgs/${org}/agents`, { name: `temp-${run}` });
+await api('PATCH', `/api/agents/${temp.agent.id}`, { name: `renamed-${run}` });
+assert.equal((await mcp(temp.key.key, 'whoami')).name, `renamed-${run}`);
+const tempTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Temp work', assignee: temp.agent.id });
+await mcp(temp.key.key, 'comment', { ref: tempTask.ref, body: 'On it.' });
+assert.equal((await api('DELETE', `/api/agents/${temp.agent.id}`)).unassigned, 1);
+await assert.rejects(mcp(temp.key.key, 'whoami'), /./);
+await assert.rejects(api('GET', `/api/agents/${temp.agent.id}`), /404/);
+assert.ok(!(await api('GET', `/api/orgs/${org}`)).members.some((m: any) => m.id === temp.agent.id));
+const tempAfter = await api('GET', `/api/items/${tempTask.ref}`);
+assert.equal(tempAfter.item.assigneeId, null);
+assert.equal(tempAfter.comments[0].authorName, `renamed-${run}`, 'history keeps the deleted agent');
+console.log('✓ agent rename and delete: keys revoked, removed from org, items unassigned, history kept');
+
 // Deleting an org: owner + typed slug; cascades, cleans up cross-org links, revokes its agents.
 const other = `other-${run}`;
 await api('POST', '/api/orgs', { slug: other, name: 'Other' });

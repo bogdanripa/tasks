@@ -7,7 +7,7 @@ import { AgentKeyReveal } from './Agent';
 
 export default function OrgPage() {
   const { org } = useParams();
-  const { refreshMe } = useSession();
+  const { me, refreshMe } = useSession();
   const { data, error, reload } = useFetch<any>(`/api/orgs/${org}`);
   const navigate = useNavigate();
   const [modal, setModal] = useState<'project' | 'invite' | 'agent' | 'delete' | null>(null);
@@ -18,6 +18,20 @@ export default function OrgPage() {
   const admin = data.org.role !== 'member';
   const humans = data.members.filter((m: any) => m.kind === 'human');
   const agents = data.members.filter((m: any) => m.kind === 'agent');
+  const canRemove = (m: any) => m.id !== me.id && (m.role === 'member' ? admin : data.org.role === 'owner');
+  const remove = async (m: any, self = false) => {
+    const what = self ? `Leave ${data.org.name}?` : `Remove ${m.name} from ${data.org.name}?`;
+    if (!confirm(`${what} Their open items here will be unassigned.`)) return;
+    try {
+      await api('DELETE', `/api/orgs/${org}/members/${m.id}`);
+      if (self) {
+        await refreshMe();
+        navigate('/');
+      } else reload();
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
 
   return (
     <div className="page">
@@ -54,6 +68,8 @@ export default function OrgPage() {
                 <span>{m.name}</span>
                 <span className="muted small">{m.email}</span>
                 <span className="role">{m.role}</span>
+                {canRemove(m) && <button className="ghost small danger" onClick={() => remove(m)}>Remove</button>}
+                {m.id === me.id && <button className="ghost small" onClick={() => remove(m, true)}>Leave</button>}
               </li>
             ))}
             {data.invites.map((i: any) => (
@@ -62,6 +78,15 @@ export default function OrgPage() {
                 <span>{i.email}</span>
                 <span className="muted small">invited</span>
                 <span className="role">{i.role}</span>
+                <button
+                  className="ghost small danger"
+                  onClick={async () => {
+                    await api('DELETE', `/api/orgs/${org}/invites/${encodeURIComponent(i.email)}`);
+                    reload();
+                  }}
+                >
+                  Cancel
+                </button>
               </li>
             ))}
           </ul>
