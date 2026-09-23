@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Event } from '../api';
+import { useOrgName } from '../App';
 import { Avatar, ErrorNote, EventRow, KindBadge, Markdown, Modal, RefLink, Time, TypeBadge, linkVerb, useFetch } from '../ui';
 
 export default function ItemPage() {
@@ -12,6 +13,7 @@ export default function ItemPage() {
   const [editing, setEditing] = useState<'title' | 'body' | null>(null);
   const [draft, setDraft] = useState('');
   const [modal, setModal] = useState<'task' | 'link' | 'trigger' | null>(null);
+  const orgName = useOrgName(org);
 
   useEffect(() => {
     const t = setInterval(() => document.visibilityState === 'visible' && !editing && reload(), 15_000);
@@ -39,10 +41,13 @@ export default function ItemPage() {
   return (
     <div className="page item-page">
       <nav className="crumbs">
-        <Link to={`/${org}`}>{org}</Link> / <Link to={`/${org}/${project.key}`}>{project.key} {project.name}</Link>
+        <Link to={`/${org}`}>{orgName}</Link>
+        <span className="sep">›</span>
+        <Link to={`/${org}/${project.key}`}>{project.name}</Link>
         {parent && (
           <>
-            {' '}/ <RefLink refStr={parent.ref} /> <span className="muted">{parent.title}</span>
+            <span className="sep">›</span>
+            <Link to={itemPath(parent.ref)}>{parent.title}</Link>
           </>
         )}
       </nav>

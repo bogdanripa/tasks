@@ -15,6 +15,8 @@ import AgentPage from './pages/Agent';
 type Session = { me: Me; refreshMe: () => Promise<void> };
 const SessionContext = createContext<Session>(null!);
 export const useSession = () => useContext(SessionContext);
+/** Display name for an org slug the user belongs to (falls back to the slug). */
+export const useOrgName = (slug?: string) => useSession().me.orgs.find((o) => o.slug === slug)?.name ?? slug ?? '';
 
 export default function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);

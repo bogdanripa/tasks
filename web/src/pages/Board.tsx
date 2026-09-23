@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Item } from '../api';
+import { useOrgName } from '../App';
 import { Avatar, ErrorNote, useFetch } from '../ui';
 
 type Filter = 'all' | 'issue' | 'task';
@@ -12,6 +13,7 @@ export default function Board() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<{ status: string; index: number } | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
+  const orgName = useOrgName(org);
 
   useEffect(() => {
     try {
@@ -62,9 +64,13 @@ export default function Board() {
     <div className="board-page">
       <div className="board-head">
         <div>
-          <Link to={`/${org}`} className="muted small">{org}</Link>
-          <h1>
-            <span className="project-key">{project.key}</span> {project.name}
+          <nav className="crumbs">
+            <Link to={`/${org}`}>{orgName}</Link>
+            <span className="sep">›</span>
+          </nav>
+          <h1 className="with-key">
+            <span className="project-key">{project.key}</span>
+            {project.name}
           </h1>
         </div>
         <div className="segmented" role="tablist">
@@ -174,7 +180,14 @@ function Card({ item, dragging, onDragStart, onDragEnd }: { item: Item; dragging
         )}
         {!!item.linkCount && <span className="pill" title="Links">⇄ {item.linkCount}</span>}
         <span className="spacer" />
-        <Avatar name={item.assigneeName} kind={item.assigneeKind} size={22} />
+        {item.assigneeName ? (
+          <span className={`assignee ${item.assigneeKind ?? ''}`} title={`Assigned to ${item.assigneeName}`}>
+            <Avatar name={item.assigneeName} kind={item.assigneeKind} size={20} />
+            <span className="assignee-name">{item.assigneeName}</span>
+          </span>
+        ) : (
+          <Avatar size={20} />
+        )}
       </div>
     </article>
   );

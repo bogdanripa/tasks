@@ -179,7 +179,7 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .board-page { padding: 16px 20px; height: calc(100vh - 49px); display: flex; flex-direction: column; }
 .board-head { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 14px; }
 .board-head > div:first-child { flex: 1; }
-.board-head h1 { display: flex; align-items: center; gap: 8px; }
+.board-head h1 { margin: 0; }
 .segmented { display: inline-flex; background: var(--surface-2); border-radius: 7px; padding: 2px; }
 .segmented button { border: none; background: none; padding: 4px 12px; font-size: 13px; color: var(--muted); }
 .segmented button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
@@ -212,6 +212,9 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .card-title { margin: 3px 0 6px; word-break: break-word; }
 .card-meta { display: flex; align-items: center; gap: 6px; }
 .card-meta .spacer { flex: 1; }
+.assignee { display: inline-flex; align-items: center; gap: 5px; max-width: 60%; font-size: 12px; color: var(--muted); }
+.assignee.agent { color: var(--agent); }
+.assignee-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill { font-size: 11px; color: var(--muted); background: var(--surface-2); padding: 0 6px; border-radius: 4px; }
 .pill.complete { color: var(--ok); }
 .add-card { margin: 0 8px 8px; background: none; border: none; color: var(--muted); justify-content: flex-start; }
@@ -220,7 +223,12 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .quick-add .actions { justify-content: flex-start; }
 
 /* item */
-.crumbs { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.crumbs { font-size: 13px; color: var(--muted); margin-bottom: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.crumbs a { color: var(--muted); }
+.crumbs a:hover { color: var(--accent); text-decoration: none; }
+.crumbs .sep { opacity: 0.6; }
+h1.with-key { display: flex; align-items: center; gap: 10px; }
+h1.with-key .project-key { align-self: center; font-size: 13px; padding: 3px 8px; }
 .item-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; }
 .item-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .item-title h1 { cursor: text; flex-basis: 100%; margin-top: 6px; }
