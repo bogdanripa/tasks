@@ -78,7 +78,7 @@ export default function OrgPage() {
               <li key={m.id}>
                 <Avatar name={m.name} kind="agent" />
                 {admin ? <Link to={`/agents/${m.id}`}>{m.name}</Link> : <span>{m.name}</span>}
-                <span className="muted small">{m.hasWebhook ? 'webhook' : 'polls via MCP'}</span>
+                <span className="muted small">{m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'polls via MCP'}</span>
                 <KindBadge kind="agent" />
               </li>
             ))}

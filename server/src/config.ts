@@ -13,4 +13,9 @@ export const config = {
   // Local-only shortcut: sign in as any email without Google. Never set in production.
   devLogin: process.env.DEV_LOGIN === '1',
   production: process.env.NODE_ENV === 'production',
+  // Overridable so tests can point routine runs at a fake server.
+  routineApiBase: (process.env.ROUTINE_API_BASE ?? 'https://api.anthropic.com').replace(/\/$/, ''),
+  routineDebounceSeconds: Number(process.env.ROUTINE_DEBOUNCE_SECONDS ?? 10),
+  secretsKey: process.env.SECRETS_KEY ?? (process.env.NODE_ENV === 'production' ? '' : 'dev-only-insecure-secrets-key'),
 };
+if (!config.secretsKey) throw new Error('SECRETS_KEY is required in production');

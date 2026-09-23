@@ -5,7 +5,8 @@ import { sql } from './db.js';
 import { config } from './config.js';
 import { HttpError } from './errors.js';
 
-export type Actor = { id: string; kind: 'human' | 'agent'; name: string; email: string | null; orgId: string | null };
+/** keyId is set when the request used an API key (run keys identify a routine run). */
+export type Actor = { id: string; kind: 'human' | 'agent'; name: string; email: string | null; orgId: string | null; keyId?: string };
 
 const SESSION_COOKIE = 'tasks_session';
 const SESSION_DAYS = 30;
@@ -13,21 +14,22 @@ const SESSION_DAYS = 30;
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const token = (bytes = 32) => randomBytes(bytes).toString('base64url');
 
-export async function mintApiKey(accountId: string, name: string) {
+export async function mintApiKey(accountId: string, name: string, expiresAt: Date | null = null) {
   const key = `tsk_${token(30)}`;
   const [row] = await sql`
-    insert into api_keys (account_id, name, prefix, hash)
-    values (${accountId}, ${name}, ${key.slice(0, 10)}, ${sha256(key)})
-    returning id, name, prefix, created_at`;
-  return { ...row, key };
+    insert into api_keys (account_id, name, prefix, hash, expires_at)
+    values (${accountId}, ${name}, ${key.slice(0, 10)}, ${sha256(key)}, ${expiresAt})
+    returning id, name, prefix, created_at, expires_at`;
+  return { ...(row as { id: string; name: string; prefix: string; createdAt: Date; expiresAt: Date | null }), key };
 }
 
 async function actorFromApiKey(key: string): Promise<Actor | null> {
   const [row] = await sql`
     update api_keys k set last_used_at = now()
     from accounts a
-    where k.hash = ${sha256(key)} and k.revoked_at is null and a.id = k.account_id
-    returning a.id, a.kind, a.name, a.email, a.org_id`;
+    where k.hash = ${sha256(key)} and k.revoked_at is null and (k.expires_at is null or k.expires_at > now())
+      and a.id = k.account_id
+    returning a.id, a.kind, a.name, a.email, a.org_id, k.id as key_id`;
   return (row as Actor) ?? null;
 }
 

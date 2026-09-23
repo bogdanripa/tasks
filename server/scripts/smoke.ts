@@ -129,6 +129,90 @@ console.log('✓ history', detail.history.length, 'events; API timeline', tl.len
 const trig = detail.links.find((l: any) => l.kind === 'triggered');
 await assert.rejects(api('DELETE', `/api/links/${trig.id}`), /permanent/);
 
+// ---- Routine agents: one run at a time, queued updates, 429 pause, run token, run finishes on status ----
+const fires: { auth: string; beta: string; text: string }[] = [];
+let respond429 = 0;
+const fake = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    // Only this run's routine: leftovers from earlier (crashed) runs must not count.
+    if (req.url !== `/v1/claude_code/routines/trig_${run}/fire`) {
+      res.writeHead(404);
+      return res.end();
+    }
+    if (respond429 > 0) {
+      respond429--;
+      res.writeHead(429, { 'retry-after': '1', 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'rate limited' } }));
+    }
+    fires.push({ auth: String(req.headers.authorization), beta: String(req.headers['anthropic-beta']), text: JSON.parse(body).text });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ type: 'routine_fire', claude_code_session_url: `https://claude.ai/code/session_${fires.length}` }));
+  });
+});
+await new Promise<void>((r) => fake.listen(4556, r));
+const tokenOf = (text: string) => /TASKS_TOKEN=(tsk_\S+)/.exec(text)![1];
+
+const rAgent = await api('POST', `/api/orgs/${org}/agents`, { name: `pironman-${run}` });
+await api('PATCH', `/api/agents/${rAgent.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
+await assert.rejects(api('PATCH', `/api/agents/${rAgent.agent.id}`, { routineUrl: 'https://evil.example.com/fire' }), /must look like/);
+
+const opsRoot = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Pi housekeeping' });
+const r1 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Rotate logs', assignee: rAgent.agent.id });
+await api('POST', `/api/comments/${r1.ref}`, { body: 'Keep 7 days please.' }); // same burst → same run
+await waitFor(() => fires.length === 1, 'first routine fire');
+await new Promise((r) => setTimeout(r, 1500));
+assert.equal(fires.length, 1, 'burst of updates is one run');
+assert.equal(fires[0].auth, 'Bearer sk-ant-oat01-test-token');
+assert.equal(fires[0].beta, 'experimental-cc-routine-2026-04-01');
+assert.match(fires[0].text, new RegExp(`Task: ${r1.ref}`));
+assert.match(fires[0].text, /assigned it to you/);
+assert.match(fires[0].text, /Keep 7 days please/);
+const run1 = tokenOf(fires[0].text);
+console.log('✓ routine fired once for a burst (assign + comment), with task context');
+
+// While the run is active, more updates queue up instead of firing.
+const r2 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Renew certs', assignee: rAgent.agent.id });
+await api('POST', `/api/comments/${r1.ref}`, { body: 'Also compress them.' });
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(fires.length, 1, 'no second run while the first is active');
+const agentView = await api('GET', `/api/agents/${rAgent.agent.id}`);
+assert.equal(agentView.queue.items, 2);
+assert.equal(agentView.runs[0].sessionUrl, 'https://claude.ai/code/session_1');
+console.log('✓ updates queue while a run is active:', agentView.queue.updates, 'updates on', agentView.queue.items, 'items');
+
+// The run works through the API with its token, as the agent. Its own changes don't wake itself.
+const seen = await api('GET', `/api/items/${r1.ref}`, undefined, run1);
+assert.ok(seen.history.some((e: any) => e.type === 'agent.run_started' && e.data.sessionUrl));
+await api('POST', `/api/comments/${r1.ref}`, { body: 'Rotated and compressed.' }, run1);
+await api('PATCH', `/api/items/${r1.ref}`, { status: 'Done' }, run1); // last step: ends the run
+
+// Queue moves, oldest pending update first: r2's assignment (queued before r1's second comment), then r1.
+await waitFor(() => fires.length === 2, 'second run after the first finished');
+assert.match(fires[1].text, new RegExp(`Task: ${r2.ref}`));
+await api('PATCH', `/api/items/${r2.ref}`, { status: 'Review' }, tokenOf(fires[1].text));
+await waitFor(() => fires.length === 3, 'third run, back on the first task');
+assert.match(fires[2].text, new RegExp(`Task: ${r1.ref}`));
+assert.match(fires[2].text, /Also compress them/);
+assert.doesNotMatch(fires[2].text, /Rotated and compressed/, 'own comment is not news');
+console.log('✓ runs are serialized per agent, oldest pending update first');
+
+// 429: pause the org's routines until Retry-After, then deliver (nothing dropped).
+await api('PATCH', `/api/items/${r1.ref}`, { status: 'Review' }, tokenOf(fires[2].text));
+respond429 = 1;
+await api('POST', `/api/comments/${r2.ref}`, { body: 'Reopening: certs for the API too.' });
+await waitFor(() => respond429 === 0, '429 response');
+const paused = await api('GET', `/api/agents/${rAgent.agent.id}`);
+assert.ok(paused.pause, 'org paused after 429');
+await waitFor(() => fires.length === 4, 'fire after the pause');
+assert.match(fires[3].text, /certs for the API too/);
+console.log('✓ 429 pauses routines until Retry-After, then the queued run fires');
+
+// Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
+assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);
+fake.close();
+
 // Deleting an org: owner + typed slug; cascades, cleans up cross-org links, revokes its agents.
 const other = `other-${run}`;
 await api('POST', '/api/orgs', { slug: other, name: 'Other' });

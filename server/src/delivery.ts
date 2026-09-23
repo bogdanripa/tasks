@@ -1,8 +1,10 @@
 import { createHmac } from 'node:crypto';
+import { fetchError } from './errors.js';
 import { sql, bus } from './db.js';
 import { config } from './config.js';
 import type { Actor } from './auth.js';
 import { inbox } from './domain.js';
+import { processRoutineQueue, type Pending } from './routine.js';
 
 const MAX_ATTEMPTS = 8;
 const BATCH = 20;
@@ -14,7 +16,8 @@ export function sign(secret: string, timestamp: string, body: string) {
 
 async function deliverDue() {
   const due = await sql`
-    select n.id, n.reason, n.attempts, n.created_at, a.id as agent_id, a.name as agent_name, a.webhook_url, a.webhook_secret,
+    select n.id, n.reason, n.attempts, n.created_at, n.item_id, a.id as agent_id, a.name as agent_name, a.org_id as agent_org_id,
+           a.webhook_url, a.webhook_secret, a.routine_url, a.routine_token_enc, v.assignee_id as item_assignee_id,
            e.type as event_type, e.data as event_data, actor.name as actor_name, actor.kind as actor_kind,
            v.ref as item_ref, v.title as item_title, v.type as item_type, v.status as item_status
     from notifications n
@@ -25,8 +28,12 @@ async function deliverDue() {
     where n.delivery_status = 'pending' and n.next_attempt_at <= now()
     order by n.id limit ${BATCH}`;
 
+  // Routine agents go through their queue; webhook agents get one POST per notification.
+  const routine = due.filter((n) => n.routineUrl && n.routineTokenEnc);
+  if (routine.length) await processRoutineQueue(routine as unknown as Pending[]);
+
   await Promise.all(
-    due.map(async (n) => {
+    due.filter((n) => !routine.includes(n)).map(async (n) => {
       if (!n.webhookUrl) {
         await sql`update notifications set delivery_status = null where id = ${n.id}`;
         return;
@@ -63,7 +70,7 @@ async function deliverDue() {
         });
         if (!res.ok) error = `HTTP ${res.status}`;
       } catch (e) {
-        error = (e as Error).message;
+        error = fetchError(e);
       }
       const attempts = n.attempts + 1;
       if (!error) {
@@ -85,6 +92,13 @@ async function deliverDue() {
 export function startDeliveryWorker() {
   let running = false;
   let again = false;
+  let wake: NodeJS.Timeout | undefined;
+  // Sleep until the next deferred delivery is due (debounce, queue re-check, backoff) rather than polling for it.
+  const scheduleWake = async () => {
+    const [{ next }] = await sql`select min(next_attempt_at) as next from notifications where delivery_status = 'pending'`;
+    clearTimeout(wake);
+    if (next) wake = setTimeout(tick, Math.min(Math.max(new Date(next).getTime() - Date.now(), 0) + 50, 60_000));
+  };
   const tick = async () => {
     if (running) {
       again = true;
@@ -96,6 +110,7 @@ export function startDeliveryWorker() {
         again = false;
         while ((await deliverDue()) === BATCH);
       } while (again);
+      await scheduleWake();
     } catch (e) {
       console.error('delivery worker', e);
     } finally {
@@ -103,10 +118,11 @@ export function startDeliveryWorker() {
     }
   };
   bus.on('pulse', tick);
-  const timer = setInterval(tick, 5000); // picks up retries whose backoff elapsed
+  const timer = setInterval(tick, 60_000); // safety net; scheduleWake handles the precise timing
   tick();
   return () => {
     clearInterval(timer);
+    clearTimeout(wake);
     bus.off('pulse', tick);
   };
 }

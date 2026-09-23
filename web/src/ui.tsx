@@ -114,6 +114,17 @@ export function describe(e: Event, showItem: boolean): ReactNode {
           <RefLink refStr={d.from} /> {linkVerb(d.kind, true)} <RefLink refStr={d.to} />
         </>
       );
+    case 'agent.run_started':
+      return (
+        <>
+          started a run{showItem && <> for {item}</>}
+          {d.sessionUrl && <> · <a href={d.sessionUrl} target="_blank" rel="noreferrer">session ↗</a></>}
+        </>
+      );
+    case 'agent.run_failed':
+      return <>couldn’t start a run{showItem && <> for {item}</>}: <span className="excerpt">{d.error}</span></>;
+    case 'agent.run_throttled':
+      return <>hit its limit of {d.limit} runs an hour{showItem ? <> on {item}</> : ' on this item'}; updates are queued until {new Date(d.resumesAt).toLocaleTimeString()}</>;
     case 'project.created':
       return <>created the project</>;
     default:
@@ -155,11 +166,11 @@ export function Modal({ onClose, title, children }: { onClose: () => void; title
   );
 }
 
-export function CopyField({ value }: { value: string }) {
+export function CopyField({ value, buttonOnly }: { value: string; buttonOnly?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="copy-field">
-      <code>{value}</code>
+      {!buttonOnly && <code>{value}</code>}
       <button
         onClick={() => {
           navigator.clipboard.writeText(value);

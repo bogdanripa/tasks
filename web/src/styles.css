@@ -255,6 +255,12 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .profile { display: flex; gap: 14px; align-items: center; }
 .profile h1 { margin: 0; }
 
+/* agent setup */
+.setup { margin-top: 12px; }
+.setup p { margin: 0; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.steps pre.code { margin: 6px 0; white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
+
 /* modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal { background: var(--surface); border-radius: 12px; padding: 18px 20px 20px; width: min(560px, 100%); max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgb(0 0 0 / 0.3); }

@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { sql, mutate, type Db } from './db.js';
 import type { Actor } from './auth.js';
 import { badRequest, forbidden, notFound } from './errors.js';
+import { encrypt } from './crypto.js';
+import { config } from './config.js';
 
 export type Role = 'owner' | 'admin' | 'member';
 export type ItemType = 'issue' | 'task';
@@ -97,6 +99,11 @@ export async function resolveMember(orgId: string, who: string, db: Db = sql): P
 
 type EventInput = { orgId: string; projectId?: string | null; itemId?: string | null; actorId: string; type: string; data?: Row };
 
+/** For background workers (e.g. routine runs) that need to write to an item's history. */
+export async function recordEvent(e: EventInput) {
+  return mutate((tx) => emit(tx, e));
+}
+
 async function emit(tx: Db, e: EventInput): Promise<number> {
   const [row] = await tx`
     insert into events (org_id, project_id, item_id, actor_id, type, data)
@@ -110,8 +117,9 @@ async function notify(tx: Db, accountId: string | null | undefined, eventId: num
   await tx`
     insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
     select a.id, ${eventId}, ${itemId}, ${reason},
-           case when a.webhook_url is not null then 'pending' end,
-           case when a.webhook_url is not null then now() end
+           case when a.routine_url is not null or a.webhook_url is not null then 'pending' end,
+           case when a.routine_url is not null then now() + ${config.routineDebounceSeconds + ' seconds'}::interval /* a burst of edits becomes one run */
+                when a.webhook_url is not null then now() end
     from accounts a
     where a.id = ${accountId}
       and not exists (select 1 from notifications n where n.account_id = a.id and n.event_id = ${eventId})`;
@@ -148,7 +156,7 @@ export async function orgDetail(actor: Actor, slug: string) {
       where p.org_id = ${org.id} group by p.id order by p.key`,
     sql`
       select a.id, a.kind, a.name, a.email, a.avatar_url, m.role,
-             (a.webhook_url is not null) as has_webhook,
+             case when a.routine_url is not null then 'routine' when a.webhook_url is not null then 'webhook' else 'poll' end as delivery,
              case when ${org.role !== 'member'} then a.webhook_url end as webhook_url
       from memberships m join accounts a on a.id = m.account_id
       where m.org_id = ${org.id} order by a.kind desc, a.name`,
@@ -225,21 +233,40 @@ export async function requireAgentAdmin(actor: Actor, agentId: string) {
   return agent;
 }
 
-export async function updateAgent(actor: Actor, agentId: string, patch: { name?: string; webhookUrl?: string | null }) {
-  await requireAgentAdmin(actor, agentId);
+/** Accepts the routine's full /fire URL or just its id. */
+function checkRoutineUrl(value: string) {
+  const v = value.trim();
+  const prefix = `${config.routineApiBase}/v1/claude_code/routines/`;
+  const url = /^[A-Za-z0-9_-]+$/.test(v) ? `${prefix}${v}/fire` : v;
+  const id = url.startsWith(prefix) ? url.slice(prefix.length).replace(/\/fire$/, '') : '';
+  if (!/^[A-Za-z0-9_-]+$/.test(id) || !url.endsWith('/fire')) throw badRequest(`Routine URL must look like ${prefix}<id>/fire`);
+  return url;
+}
+
+export async function updateAgent(
+  actor: Actor,
+  agentId: string,
+  patch: { name?: string; webhookUrl?: string | null; routineUrl?: string | null; routineToken?: string },
+) {
+  const agent = await requireAgentAdmin(actor, agentId);
   const webhook = patch.webhookUrl === undefined ? undefined : checkWebhook(patch.webhookUrl);
+  const routine = patch.routineUrl === undefined ? undefined : patch.routineUrl ? checkRoutineUrl(patch.routineUrl) : null;
+  if (routine && !patch.routineToken && !agent.routineTokenEnc) throw badRequest('Paste the routine’s API token too');
+  const tokenEnc = routine === null ? null : patch.routineToken ? encrypt(patch.routineToken.trim()) : undefined;
   const [row] = await sql`
     update accounts set
       name = coalesce(${patch.name ?? null}, name),
-      webhook_url = ${webhook === undefined ? sql`webhook_url` : webhook}
-    where id = ${agentId} returning id, name, webhook_url, webhook_secret`;
+      webhook_url = ${webhook === undefined ? sql`webhook_url` : webhook},
+      routine_url = ${routine === undefined ? sql`routine_url` : routine},
+      routine_token_enc = ${tokenEnc === undefined ? sql`routine_token_enc` : tokenEnc}
+    where id = ${agentId} returning id, name, webhook_url, webhook_secret, routine_url`;
   return row;
 }
 
 export async function listKeys(accountId: string) {
   return sql`
     select id, name, prefix, created_at, last_used_at from api_keys
-    where account_id = ${accountId} and revoked_at is null order by created_at`;
+    where account_id = ${accountId} and revoked_at is null and expires_at is null order by created_at`;
 }
 
 export async function revokeKey(actor: Actor, keyId: string) {
@@ -377,8 +404,10 @@ async function insertLink(tx: Db, actor: Actor, from: Row, to: Row, kind: LinkKi
   if (dupe) throw badRequest(`${from.ref} already ${kind} ${to.ref}`);
   const [link] = await tx`insert into links (from_id, to_id, kind, created_by) values (${from.id}, ${to.id}, ${kind}, ${actor.id}) returning id`;
   const data = { linkId: link.id, kind, from: from.ref, to: to.ref };
-  await emit(tx, { orgId: from.orgId, projectId: from.projectId, itemId: from.id, actorId: actor.id, type: 'link.created', data: { ...data, direction: 'out' } });
-  await emit(tx, { orgId: to.orgId, projectId: to.projectId, itemId: to.id, actorId: actor.id, type: 'link.created', data: { ...data, direction: 'in' } });
+  const e1 = await emit(tx, { orgId: from.orgId, projectId: from.projectId, itemId: from.id, actorId: actor.id, type: 'link.created', data: { ...data, direction: 'out' } });
+  const e2 = await emit(tx, { orgId: to.orgId, projectId: to.projectId, itemId: to.id, actorId: actor.id, type: 'link.created', data: { ...data, direction: 'in' } });
+  await notify(tx, from.assigneeId, e1, from.id, 'linked', actor);
+  await notify(tx, to.assigneeId, e2, to.id, 'linked', actor);
   return link;
 }
 
@@ -397,8 +426,10 @@ export async function removeLink(actor: Actor, linkId: string) {
   await mutate(async (tx) => {
     await tx`update links set removed_at = now() where id = ${linkId}`;
     const data = { linkId, kind: link.kind, from: from.ref, to: to.ref };
-    await emit(tx, { orgId: from.orgId, projectId: from.projectId, itemId: from.id, actorId: actor.id, type: 'link.removed', data });
-    await emit(tx, { orgId: to.orgId, projectId: to.projectId, itemId: to.id, actorId: actor.id, type: 'link.removed', data });
+    const e1 = await emit(tx, { orgId: from.orgId, projectId: from.projectId, itemId: from.id, actorId: actor.id, type: 'link.removed', data });
+    const e2 = await emit(tx, { orgId: to.orgId, projectId: to.projectId, itemId: to.id, actorId: actor.id, type: 'link.removed', data });
+    await notify(tx, from.assigneeId, e1, from.id, 'unlinked', actor);
+    await notify(tx, to.assigneeId, e2, to.id, 'unlinked', actor);
   });
 }
 
@@ -446,7 +477,11 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
       data: { ref: item.ref, title: patch.title?.trim() ?? item.title, changes },
     });
     if (changes.assignee && assignee) await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
-    if (changes.status) await notify(tx, item.assigneeId, ev, item.id, 'status_changed', actor);
+    // A routine run's last step is setting its task's status: that ends the run and lets the agent's queue move.
+    if (changes.status && actor.keyId) await finishRun(tx, actor.id, actor.keyId, item.id);
+
+    // Any change by someone else reaches the assignee (for a routine agent, that fires a run).
+    await notify(tx, item.assigneeId, ev, item.id, changes.status ? 'status_changed' : 'updated', actor);
 
     if (changes.status && status === done) {
       // Wake whoever was waiting on this: items it blocks, items that triggered it, and its issue when all tasks are done.
@@ -467,6 +502,17 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     }
   });
   return resolveItem(actor, item.id);
+}
+
+async function finishRun(tx: Db, agentId: string, keyId: string, itemId: string) {
+  const [run] = await tx`
+    update agent_runs set finished_at = now()
+    where key_id = ${keyId} and item_id = ${itemId} and finished_at is null
+    returning id`;
+  if (!run) return;
+  // Leave the run a few minutes for a closing comment, then the token dies.
+  await tx`update api_keys set expires_at = least(expires_at, now() + interval '10 minutes') where id = ${keyId}`;
+  await tx`update notifications set next_attempt_at = now() where account_id = ${agentId} and delivery_status = 'pending'`;
 }
 
 export async function addComment(actor: Actor, ref: string, body: string) {
