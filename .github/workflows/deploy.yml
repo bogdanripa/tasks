@@ -1,0 +1,180 @@
+name: deploy
+on:
+  push:
+    branches: [main]
+
+# Every run pushes the same :latest tag and the box deploys whatever that
+# points at, so two overlapping runs race and the one that FINISHES last
+# wins regardless of which commit is newer — a quick follow-up commit can
+# land first and then be undone by its predecessor. Build times still vary
+# with image size, so don't build a polling timeout around a guess; time
+# your own first run and use that. One run at a time, newest wins.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # NATIVE arm64, matching the Pi, rather than an x86 runner emulating
+    # it. Cross-building under QEMU runs every dependency install and
+    # compile step emulated, which is the difference between a couple of
+    # minutes and half an hour. GitHub's arm64 runners are free for PUBLIC
+    # repositories; on a private repo they need a paid plan, and the job
+    # will sit waiting for a runner that never comes. If that happens, put
+    # `ubuntu-latest` back and re-add `- uses: docker/setup-qemu-action@v3`
+    # above setup-buildx.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: tag
+        run: echo "value=sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - uses: docker/build-push-action@v6
+        with:
+          platforms: linux/arm64
+          push: true
+          # Without this every build is cold: nothing carries between
+          # runs, so a dependency install repeats in full even when its
+          # lockfile has not moved. Keyed on the layer inputs, so a real
+          # change still rebuilds.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # So the image can report which commit it is running. A health
+          # endpoint that answers "unknown" cannot tell you whether a
+          # deploy actually landed, which is exactly when you want to
+          # know. Ignored harmlessly if the Dockerfile declares no such
+          # ARG.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          tags: |
+            ghcr.io/bogdanripa/tasks:latest
+            ghcr.io/bogdanripa/tasks:${{ steps.tag.outputs.value }}
+
+      # Tells the box what this build pushed. On the app's FIRST deploy
+      # that image is what creates its container — the app was registered
+      # as a bare id, because only this pipeline knows what it runs. After
+      # that the box watches the tag itself and this just asks it to check
+      # now rather than at the next hourly sweep. Authenticated with this
+      # app's scoped deploy key (PAAS_KEY), which can only deploy this one
+      # app. The control plane redeploys itself often and answers 404
+      # while it restarts, so transient codes are retried rather than
+      # believed.
+      #
+      # 202 means QUEUED, not deployed. The hook used to hold the
+      # connection open until it had verified the deploy, but Cloudflare
+      # fronts that API and cuts a request at ~100s, so the deploys worth
+      # hearing about were the ones this step could not hear about — two
+      # measured at 125s, both answered 524, both hiding a real verdict.
+      # It now returns a deploy id and the next step collects the result.
+      - name: Trigger deploy on the Pi
+        id: refresh
+        run: |
+          for i in $(seq 1 10); do
+            code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer ${{ secrets.PAAS_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d '{"image": "ghcr.io/bogdanripa/tasks:latest"}' \
+              "https://api-coolify.bogdanripa.com/apps/tasks/refresh" || echo 000)
+            case "$code" in
+              2*) cat /tmp/out; echo
+                  python3 -c "import json;print('id='+json.load(open('/tmp/out')).get('deploy',''))" \
+                    >> $GITHUB_OUTPUT
+                  exit 0 ;;
+              404|000|503|504) echo "attempt $i: $code, retrying"; sleep 10 ;;
+              401) echo "PAAS_KEY is not this app's deploy key"; exit 1 ;;
+              *)  cat /tmp/out; echo; echo "refresh failed ($code)"; exit 1 ;;
+            esac
+          done
+          echo "gave up after 10 attempts"; exit 1
+
+      # The verdict the 202 could not carry. This is the ONLY step that
+      # can tell a rolled-back deploy from a good one: Coolify rolls a
+      # failed deploy back silently and the PREVIOUS container keeps
+      # serving, so the app answers its healthcheck perfectly well with
+      # the old code still running. Health polling cannot see that. This
+      # can, because the box compared container start times.
+      #
+      # 'unknown' is not failed. It means the control plane was recycled
+      # mid-deploy and never wrote the outcome down — real, since the
+      # control plane is itself an app on this box. Guessing 'failed'
+      # there would red a good build, so this warns and lets the health
+      # check below have the last word.
+      - name: Wait for the deploy to be verified
+        run: |
+          url="https://api-coolify.bogdanripa.com/apps/tasks/refresh?deploy=${{ steps.refresh.outputs.id }}"
+          for i in $(seq 1 60); do
+            body=$(curl -sS -H "Authorization: Bearer ${{ secrets.PAAS_KEY }}" "$url" || echo '{}')
+            state=$(printf '%s' "$body" | python3 -c "import json,sys;print(json.load(sys.stdin).get('state',''))" 2>/dev/null || echo)
+            case "$state" in
+              succeeded) echo "deploy verified on the box"; exit 0 ;;
+              failed) printf '%s\n' "$body"
+                      echo "the new container never came up healthy, so Coolify rolled"
+                      echo "the deploy back — the PREVIOUS version is still serving and"
+                      echo "will answer the health check below. check: apps_logs tasks"
+                      exit 1 ;;
+              running|"") sleep 5 ;;
+              unknown) printf '%s\n' "$body"
+                       echo "::warning::the box lost track of this deploy; falling through"
+                       echo "to the health check, which cannot detect a rollback"
+                       exit 0 ;;
+            esac
+          done
+          echo "::warning::no verdict after 5 minutes; falling through to the health check"
+
+      # A second opinion on top of the server-side verdict: this one also
+      # catches an app that starts, reports healthy and still serves
+      # errors on the path that matters.
+      #
+      # It requests the app's health_path (/healthz), not '/', and
+      # requires a 2xx. That distinction matters on an app that also has a
+      # frontend: '/' is answered by the static bundle straight from the
+      # CDN with no container in the path, so a '/' check goes green even
+      # when the backend is dead. Give such an app a health_path its
+      # BACKEND owns (apps_create health_path, or apps_update) and this
+      # step tests something.
+      - name: Wait for the new version to be healthy
+        run: |
+          url="https://tasks-coolify.bogdanripa.com/healthz"
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || echo 000)
+            case "$code" in
+              2*) echo "up (HTTP $code)"; exit 0 ;;
+              # Each of these is retried rather than failed, because
+              # each is something a deploy still in progress produces.
+              # 404: mid-rollover the request can still reach the
+              # outgoing container. 500: an app with
+              # is_consistent_container_name_enabled cannot run two
+              # containers at once, so its deploy stops the old one
+              # before starting the new, and the edge answers 500 across
+              # that gap. Measured on wa-gateway, run 32463472876 -- this
+              # step sampled once, hit the gap, and failed a deploy that
+              # had actually succeeded: the container was already up,
+              # healthy, and serving the new image.
+              #
+              # Retrying 500 gives up no failure detection. The loop is
+              # bounded at 40 attempts x 6s, so an app genuinely serving
+              # 500 still fails, about four minutes later. All this stops
+              # is one transient sample being treated as terminal, which
+              # is already how 502, 503 and 504 are handled -- 500 was
+              # the inconsistent one.
+              000|404|500|502|503|504) echo "waiting ($code)"; sleep 6 ;;
+              *) echo "$url answered HTTP $code — the health path must "
+                 echo "return 2xx without authentication"; exit 1 ;;
+            esac
+          done
+          echo "no 2xx from $url — either the app did not come up"
+          echo "(check: apps_logs tasks) or the app does not serve"
+          echo "/healthz; fix the route or change health_path"
+          exit 1
