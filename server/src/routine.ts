@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
 import { recordEvent } from './domain.js';
+import { compactReference } from './apidoc.js';
 
 const RUN_TOKEN_HOURS = 4;
 const MAX_RUNS_PER_ITEM_PER_HOUR = 10; // stops two agents from pinging each other forever
@@ -73,15 +74,11 @@ function describeChange(c: Record<string, any>): string {
 
 function buildPayload(p: { agentName: string; item: Record<string, any>; project: Record<string, any>; parent?: Record<string, any>; changes: string[]; token: string; expiresAt: Date }) {
   const { item, project } = p;
-  const base = config.publicUrl;
-  const auth = `-H "Authorization: Bearer $TASKS_TOKEN"`;
-  const json = `-H 'content-type: application/json'`;
-  const [org, key] = [item.orgSlug, project.key];
   return `Tasks run for agent "${p.agentName}".
 
 Task: ${item.ref} (${item.type}) ${q(item.title)}
 Status: ${item.status}. Board columns: ${project.columns.join(' → ')} (the last one means done).${p.parent ? `\nParent issue: ${p.parent.ref} ${q(p.parent.title)}` : ''}
-Link for humans: ${base}/i/${item.ref}
+Link for humans: ${config.publicUrl}/i/${item.ref}
 
 What changed since the last run:
 ${p.changes.map((c) => `- ${c}`).join('\n')}
@@ -89,17 +86,11 @@ ${p.changes.map((c) => `- ${c}`).join('\n')}
 Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
-API access. It acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}. Keep the token out of comments.
-  export TASKS=${base} TASKS_TOKEN=${p.token}
-  # Full task: description, tasks, links (incl. other projects), comments, history
-  curl -s ${auth} $TASKS/api/items/${item.ref}
-  # Comment
-  curl -s -X POST ${auth} ${json} -d '{"body":"..."}' $TASKS/api/comments/${item.ref}
-  # Update: status (one of the columns above), title, body, assignee (member name or email)
-  curl -s -X PATCH ${auth} ${json} -d '{"status":"${project.columns[project.columns.length - 1]}"}' $TASKS/api/items/${item.ref}
-  # Raise an issue in any project you can access, linked as triggered by this task
-  curl -s -X POST ${auth} ${json} -d '{"type":"issue","title":"...","triggeredBy":"${item.ref}"}' $TASKS/api/projects/${org}/${key}/items
-  # More endpoints (projects, search, members, links): curl -s $TASKS/api/help`;
+Tasks API. The token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}; keep it out of comments.
+  export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
+  curl -s -H "Authorization: Bearer $TASKS_TOKEN" $TASKS/api/items/${item.ref}
+Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
+${compactReference()}`;
 }
 
 async function markRows(ids: number[], status: 'delivered' | 'skipped' | 'failed', error: string | null, attempts?: number) {

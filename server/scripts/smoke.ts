@@ -169,6 +169,7 @@ assert.equal(fires[0].beta, 'experimental-cc-routine-2026-04-01');
 assert.match(fires[0].text, new RegExp(`Task: ${r1.ref}`));
 assert.match(fires[0].text, /assigned it to you/);
 assert.match(fires[0].text, /Keep 7 days please/);
+assert.match(fires[0].text, /PATCH \/api\/items\/\{ref\} \{title\?,body\?,status\?,assignee\?,position\?\}/, 'compact API reference');
 const run1 = tokenOf(fires[0].text);
 console.log('✓ routine fired once for a burst (assign + comment), with task context');
 
@@ -253,6 +254,12 @@ const tempAfter = await api('GET', `/api/items/${tempTask.ref}`);
 assert.equal(tempAfter.item.assigneeId, null);
 assert.equal(tempAfter.comments[0].authorName, `renamed-${run}`, 'history keeps the deleted agent');
 console.log('✓ agent rename and delete: keys revoked, removed from org, items unassigned, history kept');
+
+// API reference is generated from the registered routes: complete and self-describing.
+const help = await (await fetch(`${BASE}/api/help`)).text();
+assert.doesNotMatch(help, /\(undocumented\)/, 'every /api route has docs');
+assert.match(help, /PATCH \/api\/items\/\{ref\}\n.*\n.*\n  body:\n(.*\n)*?    status\?: string/);
+console.log('✓ /api/help generated from routes:', help.split('\n').filter((l) => /^(GET|POST|PATCH|DELETE) /.test(l)).length, 'endpoints; payload', fires[0].text.length, 'chars');
 
 // Deleting an org: owner + typed slug; cascades, cleans up cross-org links, revokes its agents.
 const other = `other-${run}`;

@@ -24,6 +24,10 @@ server/            Fastify + Postgres (postgres.js), TypeScript
 web/               React + Vite single-page app, served by the server in production
 ```
 
+## API reference
+
+`GET /api/help` is generated at runtime from the routes the server registers. Each route is declared with `route()` in `server/src/routes.ts` with a summary and Zod schemas. The same schemas validate requests and document them, so the reference can't drift from the code. Routes marked `agent: true` also go into the compact reference in routine payloads. The smoke test fails if any `/api` route is undocumented.
+
 ## Local development
 
 ```bash
@@ -69,7 +73,7 @@ Notification reasons:
 Each agent can have its own routine at claude.ai/code/routines with a **Call via API** trigger. The agent page walks through the setup: the Instructions to paste, the domain the routine's cloud environment must allow (**Network access → Custom**), and where to paste the routine's URL and token. The token is stored encrypted with `SECRETS_KEY`.
 
 - **What fires a run:** any change someone else makes to a task assigned to the agent. That covers assignment, comments, status/title/description edits, links, new tasks under an issue, and blockers or triggered items finishing. The agent's own changes never wake itself.
-- **Payload:** each run's `text` payload carries the task, what changed since the last run, and a **run token**. The run token is a fresh API key acting as the agent, which expires after 4 hours, or 10 minutes after the run ends. The run talks to Tasks with `curl`; `GET /api/help` lists the endpoints.
+- **Payload:** each run's `text` payload carries the task, what changed since the last run, and a **run token**. The run token is a fresh API key acting as the agent, which expires after 4 hours, or 10 minutes after the run ends. The run talks to Tasks with `curl`. The payload ends with a compact API reference (one line per endpoint).
 - **Queue:**
   - One run at a time per agent, taking the oldest pending update first. Updates that arrive meanwhile wait in the queue; none are dropped.
   - Edits within 10 seconds of each other are batched into one run.

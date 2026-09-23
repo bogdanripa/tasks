@@ -11,9 +11,11 @@ import { authRoutes } from './auth.js';
 import { apiRoutes } from './routes.js';
 import { mcpRoutes } from './mcp.js';
 import { startDeliveryWorker } from './delivery.js';
+import { collectRoutes } from './apidoc.js';
 
 const app = Fastify({ logger: { level: config.production ? 'info' : 'warn' }, trustProxy: true });
 await app.register(cookie);
+collectRoutes(app); // before any route, so /api/help sees them all
 
 app.setErrorHandler((err, req, reply) => {
   if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message });

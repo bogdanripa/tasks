@@ -6,86 +6,93 @@ import { badRequest } from './errors.js';
 import * as d from './domain.js';
 import { config } from './config.js';
 import { ROUTINE_INSTRUCTIONS } from './routine.js';
+import { fullReference, route } from './apidoc.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
+const assignee = z.string().nullable().optional().describe('member name, email or id; null to unassign');
+const webhook = z.string().url().nullable().optional().or(z.literal('').transform(() => null));
 
 export function apiRoutes(app: FastifyInstance) {
-  app.get('/api/me', async (req) => {
+  // ---- you ----
+  route(app, 'GET', '/api/me', { section: 'You', summary: 'your account, organizations and unread count', agent: true }, async (req) => {
     const actor = await requireActor(req);
     const [me] = await sql`select id, kind, name, email, avatar_url from accounts where id = ${actor.id}`;
     const [{ n }] = await sql`select count(*)::int as n from notifications where account_id = ${actor.id} and read_at is null`;
     return { ...me, orgs: await d.listOrgs(actor), unread: n };
   });
-
-  app.get('/api/me/work', async (req) => {
+  route(app, 'GET', '/api/me/work', { section: 'You', summary: 'open items assigned to you', agent: true }, async (req) => {
     const actor = await requireActor(req);
     return d.assignedTo(actor, actor.id);
   });
-
-  // ---- personal API keys (so humans can use the MCP too) ----
-  app.get('/api/me/keys', async (req) => d.listKeys((await requireActor(req)).id));
-  app.post('/api/me/keys', async (req) => {
-    const actor = await requireActor(req);
-    const { name } = z.object({ name: z.string().min(1).max(80) }).parse(req.body);
-    return mintApiKey(actor.id, name);
+  route(app, 'GET', '/api/inbox', {
+    section: 'You',
+    summary: 'your notifications, newest first',
+    query: z.object({ unread: z.enum(['1']).optional().describe('1: unread only') }),
+    agent: true,
+  }, async (req, { query }) => d.inbox(await requireActor(req), { unreadOnly: query.unread === '1' }));
+  route(app, 'POST', '/api/inbox/read', {
+    section: 'You',
+    summary: 'mark notifications as read',
+    body: z.object({ ids: z.union([z.array(z.number()), z.literal('all')]) }),
+  }, async (req, { body }) => {
+    await d.markRead(await requireActor(req), body.ids);
+    return { ok: true };
   });
-  app.delete<{ Params: { id: string } }>('/api/keys/:id', async (req) => {
+  route(app, 'GET', '/api/me/keys', { section: 'You', summary: 'your personal API keys' }, async (req) => d.listKeys((await requireActor(req)).id));
+  route(app, 'POST', '/api/me/keys', {
+    section: 'You',
+    summary: 'create a personal API key (returned once)',
+    body: z.object({ name: z.string().min(1).max(80) }),
+  }, async (req, { body }) => mintApiKey((await requireActor(req)).id, body.name));
+  route(app, 'DELETE', '/api/keys/:id', { section: 'You', summary: 'revoke an API key (yours, or an agent’s you administer)' }, async (req) => {
     await d.revokeKey(await requireActor(req), req.params.id);
     return { ok: true };
   });
 
-  // ---- orgs ----
-  app.post('/api/orgs', async (req) => {
-    const body = z.object({ slug, name: z.string().min(1).max(80) }).parse(req.body);
-    return d.createOrg(await requireActor(req), body);
-  });
-  app.get<{ Params: { org: string } }>('/api/orgs/:org', async (req) => d.orgDetail(await requireActor(req), req.params.org));
-  app.delete<{ Params: { org: string } }>('/api/orgs/:org', async (req) => {
-    const { confirm } = z.object({ confirm: z.string() }).parse(req.body ?? {});
-    await d.deleteOrg(await requireActor(req), req.params.org, confirm);
+  // ---- organizations ----
+  route(app, 'POST', '/api/orgs', {
+    section: 'Organizations',
+    summary: 'create an organization (humans only); you become its owner',
+    body: z.object({ slug, name: z.string().min(1).max(80) }),
+  }, async (req, { body }) => d.createOrg(await requireActor(req), body));
+  route(app, 'GET', '/api/orgs/:org', {
+    section: 'Organizations',
+    summary: 'an organization: projects, members (humans and agents), pending invites',
+    agent: true,
+  }, async (req) => d.orgDetail(await requireActor(req), req.params.org));
+  route(app, 'DELETE', '/api/orgs/:org', {
+    section: 'Organizations',
+    summary: 'delete an organization and everything in it (owners only)',
+    body: z.object({ confirm: z.string().describe('the organization slug, repeated') }),
+  }, async (req, { body }) => {
+    await d.deleteOrg(await requireActor(req), req.params.org, body.confirm);
     return { ok: true };
   });
-  app.delete<{ Params: { org: string; id: string } }>('/api/orgs/:org/members/:id', async (req) =>
-    d.removeMember(await requireActor(req), req.params.org, req.params.id),
-  );
-  app.delete<{ Params: { org: string; email: string } }>('/api/orgs/:org/invites/:email', async (req) => {
+  route(app, 'POST', '/api/orgs/:org/invites', {
+    section: 'Organizations',
+    summary: 'invite a person by Google account email (admins); they join on next sign-in',
+    body: z.object({ email: z.email(), role: z.enum(['admin', 'member']).default('member') }),
+  }, async (req, { body }) => d.inviteMember(await requireActor(req), req.params.org, body.email, body.role));
+  route(app, 'DELETE', '/api/orgs/:org/invites/:email', { section: 'Organizations', summary: 'cancel a pending invite (admins)' }, async (req) => {
     await d.cancelInvite(await requireActor(req), req.params.org, req.params.email);
     return { ok: true };
   });
-  app.post<{ Params: { org: string } }>('/api/orgs/:org/invites', async (req) => {
-    const body = z.object({ email: z.email(), role: z.enum(['admin', 'member']).default('member') }).parse(req.body);
-    return d.inviteMember(await requireActor(req), req.params.org, body.email, body.role);
-  });
-  app.post<{ Params: { org: string } }>('/api/orgs/:org/projects', async (req) => {
-    const body = z
-      .object({ key: projectKey.optional(), name: z.string().min(1).max(80), description: z.string().max(2000).optional(), columns: z.array(z.string().max(40)).max(12).optional() })
-      .parse(req.body);
-    return d.createProject(await requireActor(req), req.params.org, body);
-  });
+  route(app, 'DELETE', '/api/orgs/:org/members/:id', {
+    section: 'Organizations',
+    summary: 'remove a member or agent, or leave (your own id); their open items are unassigned',
+  }, async (req) => d.removeMember(await requireActor(req), req.params.org, req.params.id));
 
   // ---- agents ----
-  const webhook = z.string().url().nullable().optional().or(z.literal('').transform(() => null));
-  app.post<{ Params: { org: string } }>('/api/orgs/:org/agents', async (req) => {
-    const actor = await requireActor(req);
-    const body = z.object({ name: z.string().min(1).max(80), webhookUrl: webhook }).parse(req.body);
-    const agent = await d.createAgent(actor, req.params.org, body);
-    const key = await mintApiKey(agent.id, 'default');
-    return { agent, key };
+  route(app, 'POST', '/api/orgs/:org/agents', {
+    section: 'Agents',
+    summary: 'create an agent (admins); returns it with an API key, shown once',
+    body: z.object({ name: z.string().min(1).max(80), webhookUrl: webhook }),
+  }, async (req, { body }) => {
+    const agent = await d.createAgent(await requireActor(req), req.params.org, body);
+    return { agent, key: await mintApiKey(agent.id, 'default') };
   });
-  app.patch<{ Params: { id: string } }>('/api/agents/:id', async (req) => {
-    const body = z
-      .object({
-        name: z.string().min(1).max(80).optional(),
-        webhookUrl: webhook,
-        routineUrl: z.string().max(300).nullable().optional(),
-        routineToken: z.string().min(10).max(500).optional(),
-      })
-      .parse(req.body);
-    return d.updateAgent(await requireActor(req), req.params.id, body);
-  });
-  app.delete<{ Params: { id: string } }>('/api/agents/:id', async (req) => d.deleteAgent(await requireActor(req), req.params.id));
-  app.get<{ Params: { id: string } }>('/api/agents/:id', async (req) => {
+  route(app, 'GET', '/api/agents/:id', { section: 'Agents', summary: 'an agent’s settings, keys, runs, queue and recent notifications (admins)' }, async (req) => {
     const agent = await d.requireAgentAdmin(await requireActor(req), req.params.id);
     const [deliveries, runs, [queue], [pause]] = await Promise.all([
       sql`
@@ -121,104 +128,128 @@ export function apiRoutes(app: FastifyInstance) {
       routine: { instructions: ROUTINE_INSTRUCTIONS, allowDomain: new URL(config.publicUrl).host },
     };
   });
-  app.post<{ Params: { id: string } }>('/api/agents/:id/keys', async (req) => {
+  route(app, 'PATCH', '/api/agents/:id', {
+    section: 'Agents',
+    summary: 'rename an agent or change how it gets work (admins)',
+    body: z.object({
+      name: z.string().min(1).max(80).optional(),
+      webhookUrl: webhook,
+      routineUrl: z.string().max(300).nullable().optional().describe('Claude Code routine /fire URL or routine id; null to remove'),
+      routineToken: z.string().min(10).max(500).optional().describe('the routine’s API token; stored encrypted'),
+    }),
+  }, async (req, { body }) => d.updateAgent(await requireActor(req), req.params.id, body));
+  route(app, 'DELETE', '/api/agents/:id', {
+    section: 'Agents',
+    summary: 'delete (deactivate) an agent: keys revoked, open items unassigned, history kept (admins)',
+  }, async (req) => d.deleteAgent(await requireActor(req), req.params.id));
+  route(app, 'POST', '/api/agents/:id/keys', {
+    section: 'Agents',
+    summary: 'create another API key for an agent (admins); returned once',
+    body: z.object({ name: z.string().min(1).max(80).default('key') }),
+  }, async (req, { body }) => {
     const agent = await d.requireAgentAdmin(await requireActor(req), req.params.id);
-    const { name } = z.object({ name: z.string().min(1).max(80).default('key') }).parse(req.body ?? {});
-    return mintApiKey(agent.id, name);
+    return mintApiKey(agent.id, body.name);
   });
 
   // ---- projects ----
-  app.get('/api/projects', async (req) => d.listProjects(await requireActor(req)));
-  app.get<{ Params: { org: string; key: string } }>('/api/projects/:org/:key', async (req) => {
-    const actor = await requireActor(req);
-    const project = await d.resolveProject(actor, `${req.params.org}/${req.params.key}`);
+  route(app, 'GET', '/api/projects', { section: 'Projects', summary: 'projects you can access, with their board columns', agent: true }, async (req) =>
+    d.listProjects(await requireActor(req)),
+  );
+  route(app, 'POST', '/api/orgs/:org/projects', {
+    section: 'Projects',
+    summary: 'create a project (admins)',
+    body: z.object({
+      name: z.string().min(1).max(80),
+      key: projectKey.optional().describe('defaults to the first three letters of the name'),
+      description: z.string().max(2000).optional(),
+      columns: z.array(z.string().max(40)).max(12).optional().describe('board columns in order; the last means done'),
+    }),
+  }, async (req, { body }) => d.createProject(await requireActor(req), req.params.org, body));
+  route(app, 'GET', '/api/projects/:org/:key', { section: 'Projects', summary: 'a board: the project and its items', agent: true }, async (req) => {
+    const project = await d.resolveProject(await requireActor(req), `${req.params.org}/${req.params.key}`);
     return { project, items: await d.listItems(project) };
   });
-  app.get<{ Params: { org: string; key: string }; Querystring: { before?: string } }>('/api/projects/:org/:key/timeline', async (req) => {
-    const actor = await requireActor(req);
-    const project = await d.resolveProject(actor, `${req.params.org}/${req.params.key}`);
-    return d.timeline(project, { before: req.query.before ? Number(req.query.before) : undefined });
-  });
-  app.post<{ Params: { org: string; key: string } }>('/api/projects/:org/:key/items', async (req) => {
-    const actor = await requireActor(req);
-    const project = await d.resolveProject(actor, `${req.params.org}/${req.params.key}`);
-    const body = z
-      .object({
-        type: z.enum(['issue', 'task']),
-        title: z.string().min(1).max(300),
-        body: z.string().max(50_000).optional(),
-        parent: z.string().optional(),
-        assignee: z.string().nullable().optional(),
-        status: z.string().optional(),
-        triggeredBy: z.string().optional(),
-      })
-      .parse(req.body);
-    return d.createItem(actor, project, { ...body, parentRef: body.parent });
+  route(app, 'GET', '/api/projects/:org/:key/timeline', {
+    section: 'Projects',
+    summary: 'what happened in a project, newest first (50 per page)',
+    query: z.object({ before: z.coerce.number().optional().describe('event id, for the next page') }),
+    agent: true,
+  }, async (req, { query }) => {
+    const project = await d.resolveProject(await requireActor(req), `${req.params.org}/${req.params.key}`);
+    return d.timeline(project, { before: query.before });
   });
 
-  // ---- items (ref may contain a slash: org/KEY-N) ----
-  app.get<{ Params: { '*': string } }>('/api/items/*', async (req) => d.itemDetail(await requireActor(req), req.params['*']));
-  app.patch<{ Params: { '*': string } }>('/api/items/*', async (req) => {
-    const body = z
-      .object({
-        title: z.string().max(300).optional(),
-        body: z.string().max(50_000).optional(),
-        status: z.string().optional(),
-        assignee: z.string().nullable().optional(),
-        position: z.number().optional(),
-      })
-      .parse(req.body);
-    return d.updateItem(await requireActor(req), req.params['*'], body);
+  // ---- items (refs contain a slash, so they are wildcard segments) ----
+  route(app, 'POST', '/api/projects/:org/:key/items', {
+    section: 'Items',
+    summary: 'create an issue, or a task under an issue',
+    body: z.object({
+      type: z.enum(['issue', 'task']),
+      title: z.string().min(1).max(300),
+      body: z.string().max(50_000).optional().describe('Markdown'),
+      parent: z.string().optional().describe('tasks only: the issue it belongs to (same project)'),
+      assignee,
+      status: z.string().optional().describe('a board column; defaults to the first'),
+      triggeredBy: z.string().optional().describe('item that caused this one, in any project; the link is permanent'),
+    }),
+    agent: true,
+  }, async (req, { body }) => {
+    const actor = await requireActor(req);
+    const project = await d.resolveProject(actor, `${req.params.org}/${req.params.key}`);
+    return d.createItem(actor, project, { ...body, parentRef: body.parent });
   });
-  app.post<{ Params: { '*': string } }>('/api/comments/*', async (req) => {
-    const { body } = z.object({ body: z.string().min(1).max(50_000) }).parse(req.body);
-    return d.addComment(await requireActor(req), req.params['*'], body);
-  });
-  app.post('/api/links', async (req) => {
-    const body = z.object({ from: z.string(), to: z.string(), kind: z.enum(['triggered', 'blocks', 'relates']) }).parse(req.body);
-    return d.addLink(await requireActor(req), body.from, body.to, body.kind);
-  });
-  app.delete<{ Params: { id: string } }>('/api/links/:id', async (req) => {
+  route(app, 'GET', '/api/items/*', {
+    section: 'Items',
+    summary: 'an item with its project columns, parent, tasks, links, comments and history',
+    wildcard: 'ref',
+    agent: true,
+  }, async (req) => d.itemDetail(await requireActor(req), req.params['*']));
+  route(app, 'PATCH', '/api/items/*', {
+    section: 'Items',
+    summary: 'update an item; moving it to the last column marks it done',
+    wildcard: 'ref',
+    body: z.object({
+      title: z.string().max(300).optional(),
+      body: z.string().max(50_000).optional().describe('Markdown'),
+      status: z.string().optional().describe('a board column'),
+      assignee,
+      position: z.number().optional().describe('order within the column'),
+    }),
+    agent: true,
+  }, async (req, { body }) => d.updateItem(await requireActor(req), req.params['*'], body));
+  route(app, 'POST', '/api/comments/*', {
+    section: 'Items',
+    summary: 'comment on an item',
+    wildcard: 'ref',
+    body: z.object({ body: z.string().min(1).max(50_000).describe('Markdown') }),
+    agent: true,
+  }, async (req, { body }) => d.addComment(await requireActor(req), req.params['*'], body.body));
+  route(app, 'POST', '/api/links', {
+    section: 'Items',
+    summary: 'link two items, in any projects',
+    body: z.object({
+      from: z.string().describe('item ref'),
+      to: z.string().describe('item ref'),
+      kind: z.enum(['triggered', 'blocks', 'relates']).describe('blocks: from must finish before to; triggered: from caused to (permanent)'),
+    }),
+    agent: true,
+  }, async (req, { body }) => d.addLink(await requireActor(req), body.from, body.to, body.kind));
+  route(app, 'DELETE', '/api/links/:id', { section: 'Items', summary: 'remove a blocks/relates link (triggered links are permanent)', agent: true }, async (req) => {
     await d.removeLink(await requireActor(req), req.params.id);
     return { ok: true };
   });
-
-  app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => {
-    const q = (req.query.q ?? '').trim();
+  route(app, 'GET', '/api/search', {
+    section: 'Items',
+    summary: 'search items by title, description or ref',
+    query: z.object({ q: z.string().describe('at least 2 characters') }),
+    agent: true,
+  }, async (req, { query }) => {
+    const q = query.q.trim();
     if (q.length < 2) throw badRequest('Query too short');
     return d.search(await requireActor(req), q);
   });
 
-  // Plain-text API reference for agents working with curl (routine runs link here).
-  app.get('/api/help', async (_req, reply) => {
-    const b = config.publicUrl;
-    reply.type('text/plain').send(`Tasks REST API. Send Authorization: Bearer <token> and, for bodies, content-type: application/json.
-Items are referenced as org/KEY-N (e.g. demo/WEB-12). Projects as org/KEY.
-
-GET    ${b}/api/me                                  you, your orgs, unread count
-GET    ${b}/api/me/work                             open items assigned to you
-GET    ${b}/api/projects                            projects you can access (with board columns)
-GET    ${b}/api/projects/{org}/{KEY}                a board: project + its items
-GET    ${b}/api/projects/{org}/{KEY}/timeline       what happened in a project, newest first
-GET    ${b}/api/orgs/{org}                          projects, members (humans and agents) of an org
-GET    ${b}/api/items/{org}/{KEY-N}                 an item with tasks, links, comments, history
-POST   ${b}/api/projects/{org}/{KEY}/items          {"type":"issue"|"task","title","body"?,"parent"? (issue ref, for tasks),
-                                                     "assignee"? (member name/email/id),"status"?,"triggeredBy"? (item ref)}
-PATCH  ${b}/api/items/{org}/{KEY-N}                 {"title"?,"body"?,"status"?,"assignee"? (null to unassign)}
-POST   ${b}/api/comments/{org}/{KEY-N}              {"body"}
-POST   ${b}/api/links                               {"from","to","kind":"triggered"|"blocks"|"relates"}
-GET    ${b}/api/search?q=...                        search items by title, description or ref
-GET    ${b}/api/inbox?unread=1                      your notifications
-`);
-  });
-
-  // ---- inbox ----
-  app.get<{ Querystring: { unread?: string } }>('/api/inbox', async (req) =>
-    d.inbox(await requireActor(req), { unreadOnly: req.query.unread === '1' }),
+  route(app, 'GET', '/api/help', { section: 'Reference', summary: 'this reference, generated from the running server' }, async (_req, _input, reply) =>
+    reply.type('text/plain').send(fullReference(config.publicUrl)),
   );
-  app.post('/api/inbox/read', async (req) => {
-    const { ids } = z.object({ ids: z.union([z.array(z.number()), z.literal('all')]) }).parse(req.body);
-    await d.markRead(await requireActor(req), ids);
-    return { ok: true };
-  });
 }
