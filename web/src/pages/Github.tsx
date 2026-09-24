@@ -73,18 +73,7 @@ export function GithubSection({ org }: { org: string }) {
         Connected to <b>{data.account}</b> <span className="muted small">({data.accountType === 'Organization' ? 'organization' : 'user'} · since <Time iso={data.since!} />)</span>
       </p>
       <ErrorNote error={data.error ?? null} />
-      <div>
-        <h3>Repositories the app can reach</h3>
-        {data.repos?.length ? (
-          <ul className="rows">
-            {data.repos.map((r) => (
-              <li key={r}><a href={`https://github.com/${r}`} target="_blank" rel="noreferrer">{r}</a></li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted small">None yet. Add repositories to the installation on GitHub.</p>
-        )}
-      </div>
+      <RepoSummary repos={data.repos ?? []} />
       <div className="row-gap" style={{ alignItems: "center" }}>
         <a className="button" href={data.manageUrl} target="_blank" rel="noreferrer">Choose repositories on GitHub</a>
         <button className="ghost small" onClick={reload}>Refresh</button>
@@ -100,6 +89,44 @@ export function GithubSection({ org }: { org: string }) {
           Disconnect
         </button>
       </div>
+    </div>
+  );
+}
+
+/** "a, b, c and 139 more", expandable into a searchable list. */
+function RepoSummary({ repos }: { repos: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  if (!repos.length) return <p className="muted small">The app can’t reach any repositories yet. Add some to the installation on GitHub.</p>;
+  const shown = repos.slice(0, 3);
+  const matches = repos.filter((r) => r.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <div className="stack">
+      <p>
+        The app can reach{' '}
+        {shown.map((r, i) => (
+          <span key={r}>
+            {i > 0 && (i === shown.length - 1 && repos.length === shown.length ? ' and ' : ', ')}
+            <a href={`https://github.com/${r}`} target="_blank" rel="noreferrer">{r}</a>
+          </span>
+        ))}
+        {repos.length > shown.length && <> and {repos.length - shown.length} more</>}.{' '}
+        {repos.length > shown.length && (
+          <button className="link small" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show all'}</button>
+        )}
+      </p>
+      {open && (
+        <div className="stack">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${repos.length} repositories…`} autoFocus />
+          <ul className="rows repo-list">
+            {matches.slice(0, 50).map((r) => (
+              <li key={r}><a href={`https://github.com/${r}`} target="_blank" rel="noreferrer">{r}</a></li>
+            ))}
+          </ul>
+          {matches.length > 50 && <p className="muted small">{matches.length - 50} more; narrow the search.</p>}
+          {!matches.length && <p className="muted small">No repository matches.</p>}
+        </div>
+      )}
     </div>
   );
 }
