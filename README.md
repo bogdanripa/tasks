@@ -141,16 +141,18 @@ An agent set to **Run in Tasks** (Connection tab) picks a provider, a model and 
 - **Failures:** transient provider errors are retried with backoff (3 attempts); a rejected key fails the run with the provider's message.
 - **Restarts:** runs cut short by a restart are queued again at startup.
 
-Code: `server/src/llm.ts` (providers, models) and `server/src/runtime.ts` (the loop and tools).
+- **Browser:** in-house agents get a headless Chromium (one isolated session per run, closed when it ends; `BROWSER_MAX_SESSIONS`, default 2). Pages come back as Playwright's AI snapshot: the accessibility tree with element refs (`e5`), the same format Playwright MCP uses, so any model can browse. `browser_screenshot` shows the page to the model as an image in the next step only (needs a vision model), and the transcript keeps it. Tools: `browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_press`, `browser_wait`, `browser_screenshot`, `browser_console`, `browser_eval`.
+- **Browser network:** all browser traffic goes through a proxy inside Tasks that resolves hosts itself and refuses private, loopback, link-local and metadata addresses, so staging sites must be public (restrict them at the hosting level). `BROWSER_ALLOW_LOOPBACK=1` lets local tests reach localhost.
+
+Code: `server/src/llm.ts` (providers, models), `server/src/runtime.ts` (the loop and tools) and `server/src/browser.ts`.
 
 ### GitHub
 
-An admin installs the **Tasks GitHub App** for the organization (Settings → GitHub → Connect GitHub) and chooses the repositories on GitHub. The installation is only linked after checking, through the admin's own GitHub sign-in, that their account can access it. Each project then picks a repository, a base branch and a delivery mode (Project settings → Repository):
+An admin installs the **Tasks GitHub App** for the organization (Settings → GitHub → Connect GitHub) and chooses the repositories on GitHub. The installation is only linked after checking, through the admin's own GitHub sign-in, that their account can access it. Each project then picks a repository, a **production branch** and a **development branch** (Project settings → Repository). The development branch is where work starts and lands (deployed to staging); the same branch for both means working directly on it, with no release step. Reviews, who merges, and the staging and production URLs are in the project guidelines, since Tasks doesn't know or care where apps are hosted.
 
 - **Per-run token:** every run gets an installation token limited to the project's repository (contents, pull requests, Pages), valid for an hour.
-- **In-house agents** get repository tools: `repo_list_files`, `repo_read_file`, `repo_write_files` (commits to a branch), `repo_open_pull_request`, `repo_merge_pull_request`, `repo_publish_pages`.
+- **In-house agents** get repository tools: `repo_list_files`, `repo_read_file`, `repo_write_files` (commits to a branch, created from any branch), `repo_open_pull_request` (into any branch), `repo_merge_pull_request`, `repo_publish_pages`.
 - **Routine agents** get a clone URL with the token, and a `curl` for opening a pull request.
-- **Delivery:** `pr` means agents open a pull request for a human to merge. `merge` means agents merge into the base branch themselves.
 - **Webhooks:** pull requests and commits that mention `KEY-N` show up in that item's history.
 
 Server env: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY_B64`. The app's callback URL is `/api/github/callback` and its webhook URL is `/api/github/webhook`. Code: `server/src/github.ts`.

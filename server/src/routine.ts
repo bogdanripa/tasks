@@ -5,7 +5,8 @@ import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
 import { recordEvent, requeueAgent, workingColumn } from './domain.js';
 import { compactReference } from './apidoc.js';
-import { inHouseFull, REPO_TOOL_NAMES, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
+import { BROWSER_TOOL_NAMES, inHouseFull, REPO_TOOL_NAMES, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
+import { browserAvailable } from './browser.js';
 import { runRepo, type RunRepo } from './github.js';
 import { structuredPatch } from 'diff';
 
@@ -133,18 +134,19 @@ function repoSection(p: { mode: 'routine' | 'builtin'; repo?: RunRepo | { error:
   if (!('token' in p.repo)) return `\nRepository: unavailable for this run (${p.repo.error}). Say so in a comment if you need it.\n`;
   const r = p.repo;
   const branch = `task/${item.ref.split('/')[1]}`;
-  const deliver =
-    r.delivery === 'pr'
-      ? `Deliver by pull request: commit on a branch (e.g. ${branch}), open a PR into ${r.base}, and link it in your comment. Don't commit to ${r.base}.`
-      : `Deliver by merging into ${r.base}: commit on a branch (e.g. ${branch}), then open a PR and merge it (or commit to ${r.base} directly for small changes).`;
+  const branches =
+    r.base === r.prod
+      ? `Branch: ${r.prod} (production; work lands on it directly, there's no separate release).`
+      : `Branches: ${r.base} is development (work starts from it and lands on it; staging), ${r.prod} is production (only released work).`;
+  const flow = `${branches} Follow the project guidelines for reviews, merging, releasing and deploying. If they say nothing: work on a branch (e.g. ${branch}) from ${r.base}, open a pull request into ${r.base} and link it in your comment.`;
   if (p.mode === 'builtin') {
     return `
-Repository: https://github.com/${r.repo} (base branch ${r.base}). ${deliver}
-Use the repo_* tools: list and read files, write files to a branch (one commit per file), open and merge pull requests, and publish ${r.base} with GitHub Pages for a live URL.
+Repository: https://github.com/${r.repo}. ${flow}
+Use the repo_* tools: list and read files, write files to a branch (one commit per file), open pull requests into any branch, and merge them.
 `;
   }
   return `
-Repository: https://github.com/${r.repo} (base branch ${r.base}). ${deliver}
+Repository: https://github.com/${r.repo}. ${flow}
 A token limited to this repository (valid until ${r.expiresAt.toISOString()}; never put it in comments):
   git clone https://x-access-token:${r.token}@github.com/${r.repo}.git
   Open a PR: curl -s -X POST -H "Authorization: Bearer ${r.token}" https://api.github.com/repos/${r.repo}/pulls -d '{"head":"${branch}","base":"${r.base}","title":"...","body":"..."}'
@@ -233,7 +235,7 @@ Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
 ${repoSection(p, item)}
-${builtin ? `Your tools: ${[...TASK_TOOL_NAMES, ...(p.repo && 'token' in p.repo ? REPO_TOOL_NAMES : [])].join(', ')}. They act as ${p.agentName}.` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
+${builtin ? `Your tools: ${[...TASK_TOOL_NAMES, ...(p.repo && 'token' in p.repo ? REPO_TOOL_NAMES : []), ...(browserAvailable() ? BROWSER_TOOL_NAMES : [])].join(', ')}. They act as ${p.agentName}.${browserAvailable() ? ' The browser_* tools are a real browser on the public internet: test what you build or review there (open the URL, read the page, click, type, press keys, screenshot, check the console) instead of trusting the code alone.' : ''}` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
 ${compactReference()}`}`;
 }

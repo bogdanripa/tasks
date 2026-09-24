@@ -122,7 +122,7 @@ export async function disconnectGithub(actor: Actor, slug: string) {
 }
 
 /** Point a project at a repository the org's installation can reach (null to unlink). */
-export async function setProjectRepo(actor: Actor, projectRef: string, input: { repo: string | null; base?: string; delivery?: 'pr' | 'merge' }) {
+export async function setProjectRepo(actor: Actor, projectRef: string, input: { repo: string | null; base?: string; prod?: string }) {
   const project = await resolveProject(actor, projectRef);
   if ((await orgRole(actor.id, project.orgId)) === 'member') throw new HttpError(403, 'Requires an org admin');
   if (input.repo) {
@@ -133,9 +133,9 @@ export async function setProjectRepo(actor: Actor, projectRef: string, input: { 
     if (!repos.some((r) => r.toLowerCase() === input.repo!.toLowerCase())) throw badRequest(`The GitHub App can’t access ${input.repo}. Add it to the installation on GitHub first.`);
   }
   const [row] = await sql`
-    update projects set github_repo = ${input.repo},
-      github_base = ${input.base?.trim() || sql`github_base`}, github_delivery = ${input.delivery ?? sql`github_delivery`}
-    where id = ${project.id} returning github_repo, github_base, github_delivery`;
+    update projects set github_repo = ${input.repo}, github_base = ${input.base?.trim() || sql`github_base`},
+      github_prod = ${input.prod?.trim() || sql`github_prod`}
+    where id = ${project.id} returning github_repo, github_base, github_prod`;
   await recordEvent({ orgId: project.orgId, projectId: project.id, actorId: actor.id, type: 'project.updated', data: { changes: { repository: row.githubRepo } } });
   return row;
 }
@@ -143,11 +143,11 @@ export async function setProjectRepo(actor: Actor, projectRef: string, input: { 
 /** For a run: the project's repository and a token limited to it, or null when the project has none. */
 export async function runRepo(projectId: string) {
   const [p] = await sql`
-    select p.github_repo, p.github_base, p.github_delivery, g.installation_id
+    select p.github_repo, p.github_base, p.github_prod, g.installation_id
     from projects p join org_github g on g.org_id = p.org_id where p.id = ${projectId} and p.github_repo is not null`;
   if (!p || !githubConfigured()) return null;
   const { token, expiresAt } = await installationToken(p.installationId, p.githubRepo);
-  return { repo: p.githubRepo as string, base: p.githubBase as string, delivery: p.githubDelivery as 'pr' | 'merge', token, expiresAt };
+  return { repo: p.githubRepo as string, base: p.githubBase as string, prod: p.githubProd as string, token, expiresAt };
 }
 
 export type RunRepo = NonNullable<Awaited<ReturnType<typeof runRepo>>>;
@@ -160,13 +160,19 @@ export function repoOps(r: RunRepo) {
   const api = (path: string, init: Omit<RequestInit, 'body'> & { body?: unknown } = {}) =>
     ghFetch(`/repos/${r.repo}${path}`, { ...init, body: init.body === undefined ? undefined : JSON.stringify(init.body), token: r.token });
   const branchSha = async (branch: string) => (await api(`/git/ref/heads/${enc(branch)}`)).object.sha as string;
-  const ensureBranch = async (branch: string) => {
-    if (branch === r.base) return;
+  /** Create a branch from another if it doesn't exist; a missing base branch (e.g. dev) starts from the repo's default. */
+  const ensureBranch = async (branch: string, from: string): Promise<void> => {
     try {
       await branchSha(branch);
     } catch (e) {
       if ((e as HttpError).status !== 404) throw e;
-      await api('/git/refs', { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: await branchSha(r.base) } });
+      if (branch === from) {
+        const { default_branch } = await api('');
+        if (default_branch === branch) throw e; // an empty repository
+        return ensureBranch(branch, default_branch);
+      }
+      await ensureBranch(from, r.base);
+      await api('/git/refs', { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: await branchSha(from) } });
     }
   };
   return {
@@ -178,10 +184,9 @@ export function repoOps(r: RunRepo) {
       const f = await api(`/contents/${enc(path)}?ref=${encodeURIComponent(ref ?? r.base)}`);
       return Buffer.from(f.content, 'base64').toString('utf8');
     },
-    /** Commit files to a branch (created from the base branch if needed), one commit per file. */
-    async writeFiles(branch: string, message: string, files: { path: string; content: string }[]) {
-      if (branch === r.base && r.delivery === 'pr') throw badRequest(`This project delivers by pull request: commit to a branch, not ${r.base}`);
-      await ensureBranch(branch);
+    /** Commit files to a branch (created from `from`, default the base branch, if needed), one commit per file. */
+    async writeFiles(branch: string, message: string, files: { path: string; content: string }[], from = r.base) {
+      await ensureBranch(branch, from);
       const out: string[] = [];
       for (const f of files) {
         let sha: string | undefined;
@@ -198,20 +203,22 @@ export function repoOps(r: RunRepo) {
       }
       return { branch, commits: out };
     },
-    async openPullRequest(branch: string, title: string, body: string) {
-      const pr = await api('/pulls', { method: 'POST', body: { head: branch, base: r.base, title, body } });
+    async openPullRequest(branch: string, title: string, body: string, into = r.base) {
+      await ensureBranch(into, r.base);
+      const pr = await api('/pulls', { method: 'POST', body: { head: branch, base: into, title, body } });
       return { number: pr.number, url: pr.html_url };
     },
     async mergePullRequest(number: number) {
       await api(`/pulls/${number}/merge`, { method: 'PUT', body: { merge_method: 'squash' } });
       return { merged: true };
     },
-    /** Publish the base branch with GitHub Pages and return the site URL. */
-    async publishPages(path: '/' | '/docs' = '/') {
+    /** Publish a branch (default the base branch) with GitHub Pages and return the site URL. */
+    async publishPages(branch = r.base, path: '/' | '/docs' = '/') {
       try {
-        await api('/pages', { method: 'POST', body: { source: { branch: r.base, path } } });
+        await api('/pages', { method: 'POST', body: { source: { branch, path } } });
       } catch (e) {
         if (!/already/i.test((e as Error).message)) throw e;
+        await api('/pages', { method: 'PUT', body: { source: { branch, path } } });
       }
       const pages = await api('/pages');
       return { url: pages.html_url as string, status: pages.status as string };

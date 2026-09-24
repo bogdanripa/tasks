@@ -411,12 +411,13 @@ fake.close();
 
 // ---- Agents Tasks runs itself (fake OpenAI-compatible model that scripts tool calls) ----
 const modelCalls: Record<string, number> = {};
+const imagesSeen: number[] = []; // per fake-qa request: how many screenshots it was shown
 const llmServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'text-embedding-3-small'].map((id) => ({ id })) });
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'text-embedding-3-small'].map((id) => ({ id })) });
     const b = JSON.parse(body);
     modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
     const userText = b.messages.find((m: any) => m.role === 'user')?.content;
@@ -449,6 +450,24 @@ const llmServer = http.createServer((req, res) => {
       ];
       if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
       return say('Shipped.');
+    }
+    if (b.model === 'fake-qa') {
+      const images = b.messages.flatMap((m: any) => (Array.isArray(m.content) ? m.content : [])).filter((p: any) => p.type === 'image_url').length;
+      imagesSeen.push(images);
+      const toolOut = (i: number) => String(b.messages.filter((m: any) => m.role === 'tool')[i]?.content ?? '');
+      const steps: [string, unknown][] = [
+        ['browser_open', { url: 'http://localhost:4560/' }],
+        ['browser_click', { target: /button \\"Start\\" \[ref=(e\d+)\]/.exec(toolOut(0))?.[1] ?? 'text=Start' }],
+        ['browser_press', { key: 'ArrowUp', hold_ms: 100 }],
+        ['browser_screenshot', {}],
+        ['browser_console', {}],
+        ['browser_eval', { expression: 'window.paddleMoves' }],
+        ['browser_open', { url: 'http://169.254.169.254/latest/meta-data/' }],
+        ['comment', { ref, body: `QA: clicked Start (${/Started/.test(toolOut(1)) ? 'started' : 'NOT started'}), saw ${imagesSeen.filter((n) => n > 0).length} screenshot(s), console ${/boom/.test(toolOut(4)) ? 'has boom' : 'clean'}, paddle moved ${JSON.parse(toolOut(5) || '{}').value}` }],
+        ['update_item', { ref, status: 'Done' }],
+      ];
+      if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
+      return say('Tested.');
     }
     // fake-worker: start, comment, finish
     if (toolsSoFar === 0) return call('update_item', { ref, status: 'In progress' });
@@ -555,7 +574,7 @@ const ghState = await api('GET', `/api/orgs/${org}/github`);
 assert.equal(ghState.account, 'octo');
 assert.deepEqual(ghState.repos, ['octo/pong']);
 await assert.rejects(api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/secret' }), /can’t access octo\/secret/);
-await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', delivery: 'merge' });
+await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong' });
 // In-house developer: builds on a branch, opens a PR, merges it, publishes Pages, comments the URL.
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-dev', maxSteps: 20 } });
 tokenRequests = [];
@@ -568,7 +587,10 @@ assert.match(pongGhNow.comments.at(-1).body, /octo\.github\.io\/pong/);
 assert.match(repoFiles.main['index.html'], /pong/, 'merged into main');
 assert.deepEqual(tokenRequests[0]?.repositories, ['pong'], 'run token limited to the project repo');
 const devPrompt = (await api('GET', `/api/runs/${devRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text;
-assert.match(devPrompt, /Repository: https:\/\/github\.com\/octo\/pong \(base branch main\)\. Deliver by merging/);
+assert.match(devPrompt, /Repository: https:\/\/github\.com\/octo\/pong\. Branch: main \(production; work lands on it directly/);
+await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'dev', prod: 'main' });
+const projRepo = (await api('GET', `/api/projects/${org}/WEB`)).project;
+assert.deepEqual([projRepo.githubBase, projRepo.githubProd], ['dev', 'main']);
 assert.match(devPrompt, /repo_write_files/);
 // Webhooks: PRs and commits that mention an item land in its history; bad signatures are refused.
 const ghHook = async (event: string, payload: unknown, secret = 'test-webhook-secret') => {
@@ -588,6 +610,30 @@ const ghHistory = (await api('GET', `/api/items/${pongGh.ref}`)).history.map((e:
 assert.ok(ghHistory.includes('github.pull_request') && ghHistory.includes('github.commit'));
 ghServer.close();
 console.log('✓ GitHub: verified install, project repo, repo-scoped run token, in-house agent ships via PR + Pages, webhooks in history');
+
+// ---- The agent browser: a QA agent tests a page, sees a screenshot, reads the console ----
+const site = http.createServer((_req, res) => {
+  res.writeHead(200, { 'content-type': 'text/html' });
+  res.end(`<title>Pong</title><h1>Pong</h1><button onclick="document.querySelector('p').textContent='Started';console.error('boom')">Start</button><p>Idle</p>
+<canvas width=300 height=150></canvas><script>window.paddleMoves=0;addEventListener('keydown',e=>{if(e.key==='ArrowUp')window.paddleMoves++})</script>`);
+});
+await new Promise<void>((r) => site.listen(4560, r));
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-qa', maxSteps: 20 } });
+const qaItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Test Pong in the browser', status: 'Todo', assignee: house.agent.id });
+const qaRun = await runFor(qaItem.ref);
+assert.equal(qaRun.error, null);
+const qaSteps = (await api('GET', `/api/runs/${qaRun.id}`)).steps;
+const qaResult = (tool: string) => qaSteps.filter((s: any) => s.kind === 'tool_result' && s.content.tool === tool);
+assert.match(qaResult('browser_open')[0].content.output, /button \\"Start\\" \[ref=e\d+\]/, 'pages come back as an accessibility snapshot with refs');
+assert.ok(qaResult('browser_screenshot')[0].content.image.length > 1000, 'the transcript keeps the screenshot');
+assert.match(qaResult('browser_open')[1].content.output, /private address/, 'the browser can’t reach private addresses');
+const qaComment = (await api('GET', `/api/items/${qaItem.ref}`)).comments.at(-1).body;
+assert.match(qaComment, /clicked Start \(started\), saw 1 screenshot\(s\), console has boom, paddle moved 1/);
+assert.equal(Math.max(...imagesSeen), 1, 'only the latest screenshot is ever shown');
+assert.equal(imagesSeen.filter((n) => n > 0).length, 1, 'a screenshot is shown once, in the next step');
+assert.match((await api('GET', `/api/runs/${qaRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text, /browser_\* tools are a real browser/);
+site.close();
+console.log('✓ agent browser: accessibility snapshot with refs, click, keys, screenshot shown once, console, eval, private addresses refused');
 
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });

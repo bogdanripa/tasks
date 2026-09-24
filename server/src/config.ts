@@ -29,6 +29,13 @@ export const config = {
     apiBase: (process.env.GITHUB_API_BASE ?? 'https://api.github.com').replace(/\/$/, ''),
     webBase: (process.env.GITHUB_WEB_BASE ?? 'https://github.com').replace(/\/$/, ''),
   },
+  // Headless browser for in-house agents. BROWSER_PATH overrides the Chromium lookup; BROWSER_ALLOW_LOOPBACK=1
+  // lets it reach localhost (local tests only). Otherwise it only reaches the public internet.
+  browser: {
+    path: process.env.BROWSER_PATH ?? '',
+    allowLoopback: process.env.BROWSER_ALLOW_LOOPBACK === '1',
+    maxSessions: Number(process.env.BROWSER_MAX_SESSIONS ?? 2),
+  },
   secretsKey: process.env.SECRETS_KEY ?? (process.env.NODE_ENV === 'production' ? '' : 'dev-only-insecure-secrets-key'),
 };
 if (!config.secretsKey) throw new Error('SECRETS_KEY is required in production');

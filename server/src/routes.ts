@@ -159,11 +159,11 @@ export function apiRoutes(app: FastifyInstance) {
   });
   route(app, 'PATCH', '/api/projects/:org/:key/github', {
     section: 'GitHub',
-    summary: 'set the project’s repository, base branch and delivery (admins)',
+    summary: 'set the project’s repository, development branch and production branch (admins)',
     body: z.object({
       repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'owner/name').nullable(),
-      base: z.string().max(100).optional(),
-      delivery: z.enum(['pr', 'merge']).optional().describe('pr: agents open a pull request; merge: they merge into the base branch'),
+      base: z.string().max(100).optional().describe('development branch: where work starts and lands (e.g. dev, deployed to staging)'),
+      prod: z.string().max(100).optional().describe('production branch; the same as base means working directly on it, with no release step'),
     }),
   }, async (req, { body }) => github.setProjectRepo(await requireActor(req), `${req.params.org}/${req.params.key}`, body));
   route(app, 'POST', '/api/github/webhook', { section: 'GitHub', summary: 'GitHub App webhook (signed by GitHub): PRs and commits that mention KEY-N go into that item’s history' }, async (req, _input, reply) => {

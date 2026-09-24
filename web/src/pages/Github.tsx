@@ -72,15 +72,15 @@ export function GithubSection({ org }: { org: string }) {
   );
 }
 
-/** Project settings tab: the repository agents work in, its base branch, and how work is delivered. */
+/** Project settings tab: the repository agents work in, and its production and development branches. */
 export function RepositorySection({ org, projectKey, project, onSaved }: { org: string; projectKey: string; project: any; onSaved: () => void }) {
   const gh = useFetch<OrgGithub>(`/api/orgs/${org}/github`);
   const [repo, setRepo] = useState<string>(project.githubRepo ?? '');
-  const [base, setBase] = useState<string>(project.githubBase ?? 'main');
-  const [delivery, setDelivery] = useState<string>(project.githubDelivery ?? 'pr');
+  const [prod, setProd] = useState<string>(project.githubProd ?? 'main');
+  const [dev, setDev] = useState<string>(project.githubBase ?? 'main');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  useEffect(() => setSaved(false), [repo, base, delivery]);
+  useEffect(() => setSaved(false), [repo, prod, dev]);
 
   if (!gh.data) return <p className="muted">Loading…</p>;
   if (!gh.data.connected) {
@@ -91,6 +91,7 @@ export function RepositorySection({ org, projectKey, project, onSaved }: { org: 
     );
   }
   const repos = [...new Set([...(gh.data.repos ?? []), ...(project.githubRepo ? [project.githubRepo] : [])])];
+  const known = !repo.trim() || repos.some((r) => r.toLowerCase() === repo.trim().toLowerCase());
   return (
     <form
       className="stack"
@@ -98,7 +99,7 @@ export function RepositorySection({ org, projectKey, project, onSaved }: { org: 
         e.preventDefault();
         setError(null);
         try {
-          await api('PATCH', `/api/projects/${org}/${projectKey}/github`, { repo: repo || null, base, delivery });
+          await api('PATCH', `/api/projects/${org}/${projectKey}/github`, { repo: repo.trim() || null, base: dev.trim() || prod.trim(), prod });
           setSaved(true);
           onSaved();
         } catch (err) {
@@ -108,31 +109,45 @@ export function RepositorySection({ org, projectKey, project, onSaved }: { org: 
     >
       <p className="muted small">
         The repository agents work in for this project. Agents that Tasks runs get repository tools; Claude Code routines get a clone URL
-        with a token limited to this repository.
+        with a token limited to this repository. Reviews, who merges, and the staging and production URLs belong in the project’s{' '}
+        <b>Guidelines</b>.
       </p>
       <label>
         Repository
-        <select value={repo} onChange={(e) => setRepo(e.target.value)}>
-          <option value="">None</option>
-          {repos.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        <input
+          list="gh-repos"
+          value={repo}
+          onChange={(e) => setRepo(e.target.value)}
+          placeholder={repos.length ? `Search ${repos.length} repositories…` : 'owner/name'}
+          autoComplete="off"
+        />
+        <datalist id="gh-repos">
+          {repos.map((r) => <option key={r} value={r} />)}
+        </datalist>
+        {!known && <span className="small error-text">The GitHub App can’t reach this repository. Add it to the installation on GitHub.</span>}
+        {!repo && <span className="muted small">Empty: no repository.</span>}
       </label>
       {repo && (
-        <>
+        <div className="branch-fields">
           <label>
-            Base branch
-            <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="main" />
+            Production branch
+            <input value={prod} onChange={(e) => setProd(e.target.value)} placeholder="main" />
+            <span className="muted small">Released work, deployed to production.</span>
           </label>
-          <fieldset className="stack">
-            <legend>Delivery</legend>
-            <label className="row-gap" style={{ alignItems: "center", fontWeight: 400 }}><input type="radio" checked={delivery === 'pr'} onChange={() => setDelivery('pr')} /> Open a pull request for a human to merge</label>
-            <label className="row-gap" style={{ alignItems: "center", fontWeight: 400 }}><input type="radio" checked={delivery === 'merge'} onChange={() => setDelivery('merge')} /> Agents merge into {base || 'main'} themselves</label>
-          </fieldset>
-        </>
+          <label>
+            Development branch
+            <input value={dev} onChange={(e) => setDev(e.target.value)} placeholder="dev" />
+            <span className="muted small">
+              {dev.trim() && dev.trim() !== prod.trim()
+                ? 'Where work starts and lands, deployed to staging. Created from the production branch if missing.'
+                : 'Same as production: agents work directly on it, with no staging and no release step.'}
+            </span>
+          </label>
+        </div>
       )}
       <ErrorNote error={error} />
-      <div className="row-gap" style={{ alignItems: "center" }}>
-        <button className="primary" type="submit">Save</button>
+      <div className="row-gap" style={{ alignItems: 'center' }}>
+        <button className="primary" type="submit" disabled={!known}>Save</button>
         {saved && <span className="muted small">Saved</span>}
       </div>
     </form>

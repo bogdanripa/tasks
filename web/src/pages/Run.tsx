@@ -17,7 +17,7 @@ export default function RunPage() {
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
   const { run, steps } = data;
-  const results = new Map(steps.filter((s) => s.kind === 'tool_result').map((s) => [s.content.id, s.content.output]));
+  const results = new Map(steps.filter((s) => s.kind === 'tool_result').map((s) => [s.content.id, s.content]));
 
   return (
     <div className="page narrow run-page">
@@ -48,12 +48,16 @@ export default function RunPage() {
           }
           if (s.kind === 'text') return <li key={s.id} className="step text"><Markdown>{s.content.text}</Markdown></li>;
           if (s.kind === 'tool_call') {
-            const out = results.get(s.content.id);
+            const res = results.get(s.content.id);
+            const out = res?.output;
             return (
               <li key={s.id} className="step tool">
                 <div>
                   <code className="tool-name">{s.content.tool}</code> <code className="muted">{JSON.stringify(s.content.input)}</code>
                 </div>
+                {res?.image && (
+                  <img className="screenshot" src={`data:image/jpeg;base64,${res.image}`} alt="What the agent saw" />
+                )}
                 {out !== undefined && (
                   <details>
                     <summary className="small muted">result</summary>

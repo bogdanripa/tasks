@@ -9,8 +9,8 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-alpine
-# curl: pironman's container healthcheck needs curl or wget.
-RUN apk add --no-cache curl
+# curl: pironman's container healthcheck needs curl or wget. chromium + fonts: the browser in-house agents test with.
+RUN apk add --no-cache curl chromium ttf-freefont font-noto
 WORKDIR /app
 ENV NODE_ENV=production PORT=80
 COPY --from=build /app/node_modules node_modules

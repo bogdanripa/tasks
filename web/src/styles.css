@@ -394,3 +394,7 @@ pre.code { background: var(--surface-2); padding: 10px; border-radius: 6px; over
   .link-kind { min-width: 0; }
   .rows li { flex-wrap: wrap; }
 }
+.transcript .screenshot { display: block; max-width: 100%; margin: 6px 0; border: 1px solid var(--border); border-radius: 6px; }
+.branch-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.branch-fields label span { display: block; margin-top: 4px; font-weight: 400; }
+@media (max-width: 640px) { .branch-fields { grid-template-columns: 1fr; } }

@@ -653,8 +653,8 @@ export async function createProject(
     const [dupe] = await tx`select 1 from projects where org_id = ${org.id} and key = ${key}`;
     if (dupe) throw badRequest(`Project key ${key} already exists`);
     const [p] = await tx`
-      insert into projects (org_id, key, name, description, guidelines, column_skills, column_handoffs ${columns ? tx`, columns` : tx``})
-      values (${org.id}, ${key}, ${input.name}, ${input.description ?? ''}, ${forAgents ? PIPELINE_TEMPLATE : ''},
+      insert into projects (org_id, key, name, description, guidelines, github_base, column_skills, column_handoffs ${columns ? tx`, columns` : tx``})
+      values (${org.id}, ${key}, ${input.name}, ${input.description ?? ''}, ${forAgents ? PIPELINE_TEMPLATE : ''}, ${forAgents ? 'dev' : 'main'},
               ${tx.json(forAgents ? { Todo: 'product' } : {})}, ${tx.json(forAgents ? { Review: 'review' } : {})}
               ${columns ? tx`, ${columns}` : tx``})
       returning *`;

@@ -7,6 +7,7 @@ import * as d from './domain.js';
 import { languageModel, providerFor } from './llm.js';
 import { releaseRun } from './routine.js';
 import { repoOps, type RunRepo } from './github.js';
+import { browser_, browserAvailable, closeSession } from './browser.js';
 
 /**
  * Agents that Tasks runs itself: an LLM with Tasks' own actions as tools, driven by the same payload
@@ -37,32 +38,134 @@ function repoTools(r: RunRepo, wrap: <A>(fn: (a: A) => Promise<unknown>) => (a: 
       execute: wrap(({ path, branch }: any) => ops.readFile(path, branch)),
     }),
     repo_write_files: tool({
-      description: `Create or replace files on a branch (created from ${r.base} if it doesn't exist). Give each file's full new content.`,
-      inputSchema: z.object({ branch: z.string(), message: z.string(), files: z.array(z.object({ path: z.string(), content: z.string() })).min(1) }),
-      execute: wrap(({ branch, message, files }: any) => ops.writeFiles(branch, message, files)),
+      description: `Create or replace files on a branch, one commit per file. A new branch is created from \`from\` (default ${r.base}). Give each file's full new content.`,
+      inputSchema: z.object({
+        branch: z.string(),
+        message: z.string(),
+        files: z.array(z.object({ path: z.string(), content: z.string() })).min(1),
+        from: z.string().optional().describe(`branch to start a new branch from (default ${r.base})`),
+      }),
+      execute: wrap(({ branch, message, files, from }: any) => ops.writeFiles(branch, message, files, from)),
     }),
     repo_open_pull_request: tool({
-      description: `Open a pull request from a branch into ${r.base}.`,
-      inputSchema: z.object({ branch: z.string(), title: z.string(), body: z.string() }),
-      execute: wrap(({ branch, title, body }: any) => ops.openPullRequest(branch, title, body)),
+      description: `Open a pull request from a branch into another (default ${r.base}).`,
+      inputSchema: z.object({ branch: z.string(), title: z.string(), body: z.string(), into: z.string().optional() }),
+      execute: wrap(({ branch, title, body, into }: any) => ops.openPullRequest(branch, title, body, into)),
     }),
     repo_merge_pull_request: tool({
-      description: `Merge (squash) a pull request into ${r.base}.${r.delivery === 'pr' ? ' This project delivers by pull request: only merge if the guidelines or a human say so.' : ''}`,
+      description: 'Merge a pull request into its target branch, when the project guidelines say you may.',
       inputSchema: z.object({ number: z.number().int() }),
       execute: wrap(({ number }: any) => ops.mergePullRequest(number)),
     }),
     repo_publish_pages: tool({
-      description: `Publish ${r.base} as a website with GitHub Pages (a static site: index.html at the root, or in /docs) and get its URL. It can take a minute to go live.`,
-      inputSchema: z.object({ folder: z.enum(['/', '/docs']).optional() }),
-      execute: wrap(({ folder }: any) => ops.publishPages(folder ?? '/')),
+      description: 'Publish a branch of a static site (index.html at the root, or in /docs) with GitHub Pages and get its URL. Only if the project guidelines deploy this way. It can take a minute to go live.',
+      inputSchema: z.object({ branch: z.string().optional(), folder: z.enum(['/', '/docs']).optional() }),
+      execute: wrap(({ branch, folder }: any) => ops.publishPages(branch, folder ?? '/')),
     }),
   };
+}
+
+export const BROWSER_TOOL_NAMES = ['browser_open', 'browser_read', 'browser_click', 'browser_type', 'browser_press', 'browser_wait', 'browser_screenshot', 'browser_console', 'browser_eval'];
+
+/** Screenshots waiting to be shown to the model (next step only), and kept for the transcript by tool call. */
+type Shots = { pending: string[]; byCall: Map<string, string> };
+
+/**
+ * A headless browser (one per run) on the public internet. Pages come back as Playwright's AI snapshot: the
+ * accessibility tree with element refs (e5), so any model can use it; screenshots also need a vision model.
+ */
+function browserTools(runId: string, shots: Shots): ToolSet {
+  const safe =
+    <A,>(fn: (a: A) => Promise<unknown>) =>
+    async (a: A) => {
+      try {
+        const out = JSON.stringify(await fn(a));
+        return out.length > MAX_TOOL_OUTPUT ? `${out.slice(0, MAX_TOOL_OUTPUT)}… (truncated)` : out;
+      } catch (e) {
+        return JSON.stringify({ error: (e as Error).message.split('\n')[0] });
+      }
+    };
+  const targetDesc = 'an element ref from the page snapshot (e.g. e5), or a Playwright selector (CSS, text=Start)';
+  return {
+    browser_open: tool({
+      description: 'Open a URL in your browser and get the page: its accessibility tree, each element tagged with a ref like [ref=e5] for the other browser tools.',
+      inputSchema: z.object({ url: z.string() }),
+      execute: safe(({ url }: any) => browser_.open(runId, url)),
+    }),
+    browser_read: tool({
+      description: 'The current page again (accessibility tree with refs).',
+      inputSchema: z.object({}),
+      execute: safe(() => browser_.read(runId)),
+    }),
+    browser_click: tool({
+      description: `Click an element (${targetDesc}), or a point (x, y in CSS pixels, e.g. inside a canvas). Returns the page after the click.`,
+      inputSchema: z.object({ target: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
+      execute: safe((a: any) => browser_.click(runId, a)),
+    }),
+    browser_type: tool({
+      description: `Fill a field (${targetDesc}) with text, or type into whatever has focus when no target is given. submit presses Enter.`,
+      inputSchema: z.object({ target: z.string().optional(), text: z.string(), submit: z.boolean().optional() }),
+      execute: safe((a: any) => browser_.type(runId, a)),
+    }),
+    browser_press: tool({
+      description: 'Press a key (Enter, ArrowUp, w, Space, …), optionally several times or held down for hold_ms (for games).',
+      inputSchema: z.object({ key: z.string(), times: z.number().int().optional(), hold_ms: z.number().int().optional() }),
+      execute: safe((a: any) => browser_.press(runId, a)),
+    }),
+    browser_wait: tool({
+      description: 'Wait up to 10 seconds (e.g. for an animation, or a deploy to finish before reloading).',
+      inputSchema: z.object({ ms: z.number().int() }),
+      execute: safe(({ ms }: any) => browser_.wait(runId, ms)),
+    }),
+    browser_screenshot: tool({
+      description: 'See the page: a screenshot is shown to you in the next message (needs a model that reads images). Use it to check what the page looks like.',
+      inputSchema: z.object({ full_page: z.boolean().optional() }),
+      execute: async ({ full_page }: any, { toolCallId }: { toolCallId: string }) => {
+        try {
+          const { image, ...rest } = await browser_.screenshot(runId, full_page);
+          shots.pending.push(image);
+          shots.byCall.set(toolCallId, image);
+          return JSON.stringify({ ...rest, note: 'The screenshot is attached in the next message.' });
+        } catch (e) {
+          return JSON.stringify({ error: (e as Error).message.split('\n')[0] });
+        }
+      },
+    }),
+    browser_console: tool({
+      description: 'Console messages, uncaught errors, failed requests and HTTP errors since the last check.',
+      inputSchema: z.object({}),
+      execute: safe(() => browser_.console(runId)),
+    }),
+    browser_eval: tool({
+      description: 'Evaluate a JavaScript expression in the page and get its JSON value (e.g. read game state).',
+      inputSchema: z.object({ expression: z.string() }),
+      execute: safe(({ expression }: any) => browser_.evaluate(runId, expression)),
+    }),
+  };
+}
+
+const SHOT_TEXT = '[browser screenshot]';
+
+/** Show pending screenshots once, in the next step, and drop earlier ones so images don't pile up. */
+function withScreenshots(messages: any[], shots: Shots) {
+  const out = messages.map((m) =>
+    m.role === 'user' && Array.isArray(m.content) && m.content[0]?.text === SHOT_TEXT
+      ? { role: 'user', content: '(an earlier screenshot, no longer shown)' }
+      : m,
+  );
+  if (shots.pending.length) {
+    out.push({
+      role: 'user',
+      content: [{ type: 'text', text: SHOT_TEXT }, ...shots.pending.splice(0).map((image) => ({ type: 'image', image, mediaType: 'image/jpeg' }))],
+    });
+  }
+  return out;
 }
 
 /** The tools an in-house agent works with, acting as the agent (so the usual rules apply). */
 export const TASK_TOOL_NAMES = ['get_item', 'update_item', 'comment', 'create_issue', 'create_task', 'link_items', 'list_items', 'search', 'list_members', 'end_run'];
 
-function taskTools(actor: Actor, repo: RunRepo | null): ToolSet {
+function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string; shots: Shots } | null): ToolSet {
   const wrap =
     <A,>(fn: (a: A) => Promise<unknown>) =>
     async (a: A) => {
@@ -168,6 +271,7 @@ function taskTools(actor: Actor, repo: RunRepo | null): ToolSet {
       execute: wrap(() => d.endRun(actor)),
     }),
     ...(repo ? repoTools(repo, wrap) : {}),
+    ...(browser ? browserTools(browser.runId, browser.shots) : {}),
   };
 }
 
@@ -219,13 +323,15 @@ async function execute(run: InHouseRun) {
   let input = 0;
   let output = 0;
   let steps = 0;
+  const shots: Shots = { pending: [], byCall: new Map() };
   try {
     const result = await generateText({
       model: languageModel(provider, run.model),
       system: run.system,
       prompt: run.prompt,
-      tools: taskTools(actor, run.repo),
+      tools: taskTools(actor, run.repo, browserAvailable() ? { runId: run.runId, shots } : null),
       stopWhen: [stepCountIs(run.maxSteps), () => runFinished(run.runId)],
+      prepareStep: ({ messages }: any) => ({ messages: withScreenshots(messages, shots) }),
       maxRetries: 2,
       abortSignal: AbortSignal.timeout(RUN_TIMEOUT_MS),
       onStepFinish: async (step: any) => {
@@ -234,7 +340,11 @@ async function execute(run: InHouseRun) {
         output += step.usage?.outputTokens ?? 0;
         if (step.text?.trim()) await logStep(run.runId, 'text', { text: step.text });
         for (const c of step.toolCalls ?? []) await logStep(run.runId, 'tool_call', { id: c.toolCallId, tool: c.toolName, input: c.input });
-        for (const r of step.toolResults ?? []) await logStep(run.runId, 'tool_result', { id: r.toolCallId, tool: r.toolName, output: r.output });
+        for (const r of step.toolResults ?? []) {
+          const image = shots.byCall.get(r.toolCallId);
+          shots.byCall.delete(r.toolCallId);
+          await logStep(run.runId, 'tool_result', { id: r.toolCallId, tool: r.toolName, output: r.output, ...(image ? { image } : {}) });
+        }
         await sql`update agent_runs set steps = ${steps}, input_tokens = ${input}, output_tokens = ${output} where id = ${run.runId}`;
       },
     });
@@ -243,6 +353,8 @@ async function execute(run: InHouseRun) {
     const err = e as Error & { statusCode?: number };
     const transient = !err.statusCode || err.statusCode === 429 || err.statusCode >= 500;
     return fail(run, `the model call failed: ${err.message}`, transient);
+  } finally {
+    await closeSession(run.runId);
   }
 
   if (await runFinished(run.runId)) return;
