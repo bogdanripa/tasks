@@ -519,6 +519,11 @@ export function apiRoutes(app: FastifyInstance) {
     wildcard: 'ref',
     agent: true,
   }, async (req) => d.itemDetail(await requireActor(req), req.params['*']));
+  route(app, 'POST', '/api/start-now/*', {
+    section: 'Items',
+    summary: 'skip the quiet period: send the item’s waiting updates to its agent now',
+    wildcard: 'ref',
+  }, async (req) => d.startNow(await requireActor(req), req.params['*']));
   route(app, 'PATCH', '/api/items/*', {
     section: 'Items',
     summary: 'update an item; moving it to the last column marks it done',

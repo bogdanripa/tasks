@@ -206,7 +206,7 @@ function Card({ item, dragging, onDragStart, onDragEnd }: { item: Item; dragging
         )}
         {!!item.linkCount && <span className="pill" title="Links">⇄ {item.linkCount}</span>}
         {item.working && <span className="working" title="An agent is working on this right now">working</span>}
-        {!item.working && item.startsAt && !item.blockedBy?.length && !item.done && <StartsSoon at={item.startsAt} />}
+        {!item.working && item.startsAt && !item.blockedBy?.length && !item.done && <StartsSoon at={item.startsAt} itemRef={item.ref} agent={item.assigneeName} />}
         {item.skill && !item.assigneeName && !item.done && <SkillChip skill={item.skill} missing />}
         {!item.working && !!item.blockedBy?.length && !item.done && <span className="pill" title={`Waiting on ${item.blockedBy.join(', ')}`}>⏸ blocked</span>}
         <span className="spacer" />

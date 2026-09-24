@@ -710,6 +710,7 @@ assert.match(relOut, /needs a human/, 'agents can’t merge into production');
 assert.equal(mergeMethods.length, 1, 'nothing was merged');
 fakePrHead = null;
 await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'main', prod: 'main' });
+await api('PATCH', `/api/items/${rel.ref}`, { status: 'Done' }); // so closing its approval task below wakes no one
 // A person merging the release PR on GitHub closes the task that asked them to.
 const approve = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: rel.ref, title: 'Approve the release', body: 'Please merge https://github.com/octo/pong/pull/77', assignee: (await api('GET', '/api/me')).id }, house.key.key);
 // Webhooks: PRs and commits that mention an item land in its history; bad signatures are refused.
@@ -873,6 +874,22 @@ const looseNow = await api('GET', `/api/items/${loose.ref}`);
 assert.equal(looseNow.item.assigneeKind, 'human');
 assert.ok(looseNow.history.some((e: any) => e.data?.byReply));
 console.log('✓ replying on an unassigned item assigns it to the person');
+// Start now: skip the quiet period on an item waiting for its agent.
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
+const soon = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Start me now', status: 'Todo', assignee: house.agent.id });
+const listed = (await api('GET', `/api/projects/${org}/WEB`)).items.find((i: any) => i.ref === soon.ref);
+assert.ok(listed.startsAt, 'the board knows when the agent will start');
+assert.equal((await api('POST', `/api/start-now/${soon.ref}`)).started, 1);
+await runFor(soon.ref);
+await assert.rejects(api('POST', `/api/start-now/${soon.ref}`), /Nothing is waiting/);
+console.log('✓ start now: the board shows when an agent starts, and a person can skip the wait');
+// An agent's comment on another agent's item is a note: in their inbox, but no run.
+const noted = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Someone else’s item', status: 'Todo', assignee: rAgent.agent.id });
+await api('POST', `/api/comments/${noted.ref}`, { body: 'FYI: found the cause' }, house.key.key);
+const rDeliveries = (await api('GET', `/api/agents/${rAgent.agent.id}`)).deliveries.filter((d: any) => d.itemRef === noted.ref);
+const note = rDeliveries.find((d: any) => d.reason === 'commented');
+assert.ok(note && note.deliveryStatus === null, 'an agent’s comment doesn’t start another agent’s run');
+console.log('✓ agents’ comments reach inboxes without starting runs');
 const workMe = await api('GET', '/api/work?assignee=me');
 assert.ok(workMe.items.some((i: any) => i.ref === loose.ref), 'my open work, across projects');
 const workHouse = await api('GET', `/api/work?assignee=${house.agent.id}`);

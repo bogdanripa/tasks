@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { get, itemPath, type Event } from './api';
+import { api, get, itemPath, type Event } from './api';
 
 /** Fetch JSON on mount / when `path` changes. `reload` refetches without clearing. */
 export function useFetch<T>(path: string | null) {
@@ -348,16 +348,37 @@ export function SkillsEditor({ value, suggestions, onSave }: { value: string[]; 
  * An agent will pick this up soon: counts down the quiet period (people may still be editing), then says
  * "queued" while the agent finishes other work.
  */
-export function StartsSoon({ at }: { at: string }) {
+export function StartsSoon({ at, itemRef, agent, onStarted }: { at: string; itemRef?: string; agent?: string | null; onStarted?: () => void }) {
   const [now, setNow] = useState(Date.now());
+  const [asked, setAsked] = useState(false);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
   const left = Math.ceil((new Date(at).getTime() - now) / 1000);
-  const label = left > 0 ? `starting in ${left >= 60 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left}s`}` : 'queued';
-  const title = left > 0
-    ? 'An agent will start on this after a short quiet period, so any edits you are still making reach it together'
-    : 'Waiting for the agent to finish its current work';
-  return <span className="starting" title={title}>{label}</span>;
+  if (left <= 0 || asked) {
+    return <span className="starting" title="Waiting for the agent to finish its current work">{asked ? 'starting…' : 'queued'}</span>;
+  }
+  const label = `starting in ${left >= 60 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left}s`}`;
+  return (
+    <button
+      type="button"
+      className="starting as-button"
+      title="An agent will start on this after a short quiet period, so edits you're still making reach it together. Click to start now."
+      onClick={async (e) => {
+        e.stopPropagation(); // the card itself opens the item
+        if (!itemRef) return;
+        if (!confirm(`Start ${agent ?? 'the agent'} on this now? Anything you edit after this goes in its next run.`)) return;
+        setAsked(true);
+        try {
+          await api('POST', `/api/start-now/${itemRef}`, undefined, { toast: 'Starting now' });
+          onStarted?.();
+        } catch {
+          setAsked(false);
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
 }

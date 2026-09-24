@@ -478,3 +478,5 @@ code.inherited { margin-right: 6px; }
 .board-head h1 { white-space: nowrap; }
 .starting { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .starting::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--agent); box-sizing: border-box; }
+.starting.as-button { border: 1px dashed var(--agent); background: transparent; border-radius: 10px; padding: 1px 7px; cursor: pointer; color: var(--agent); }
+.starting.as-button:hover { background: var(--agent-soft); }

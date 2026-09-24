@@ -114,6 +114,19 @@ export async function watchdogSignal(item: { id: string; orgId: string; projectI
   });
 }
 
+/** Skip the quiet period: the item's waiting updates go to its agent now (if the agent is free). */
+export async function startNow(actor: Actor, ref: string) {
+  const item = await resolveItem(actor, ref);
+  const rows = await mutate(
+    (tx) => tx`
+      update notifications set next_attempt_at = now()
+      where item_id = ${item.id} and account_id = ${item.assigneeId} and delivery_status = 'pending'
+      returning id`,
+  );
+  if (!rows.length) throw badRequest('Nothing is waiting to start on this item');
+  return { started: rows.length };
+}
+
 /** For background workers (e.g. routine runs) that need to write to an item's history. */
 export async function recordEvent(e: EventInput) {
   return mutate((tx) => emit(tx, e));
@@ -141,12 +154,15 @@ async function notify(tx: Db, accountId: string | null | undefined, eventId: num
   const quiet = `${actor.kind === 'agent' ? 0 : config.agentQuietSeconds} seconds`;
   // Agents get their updates delivered; people who set up alerts get the ones that need them.
   const alert = isAlert(reason, actor);
+  // An agent's comments are notes on its work (it may add several while figuring things out): they reach
+  // people's inboxes but never start another agent's run. Hand-offs go through tasks and statuses.
+  const wakes = !(reason === 'commented' && actor.kind === 'agent');
   const [row] = await tx`
     insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
     select a.id, ${eventId}, ${itemId}, ${reason},
-           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null
+           case when (${wakes} and (a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null))
                   or (${alert} and a.kind = 'human' and a.telegram_chat_id is not null) then 'pending' end,
-           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null
+           case when (${wakes} and (a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null))
                   or (${alert} and a.kind = 'human' and a.telegram_chat_id is not null) then now() + ${quiet}::interval end
     from accounts a
     where a.id = ${accountId}

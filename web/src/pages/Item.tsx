@@ -44,16 +44,17 @@ export default function ItemPage() {
         {parent && (
           <>
             <span className="sep">›</span>
-            <Link to={itemPath(parent.ref)}>{parent.title}</Link>
+            <Link to={itemPath(parent.ref)}>{parent.ref.split('/')[1]}</Link>
           </>
         )}
+        <span className="sep">›</span>
+        <TypeBadge type={item.type} />
+        <span className="ref">{item.ref.split('/')[1]}</span>
       </nav>
 
       <div className="item-grid">
         <div className="item-main">
           <div className="item-title">
-            <TypeBadge type={item.type} />
-            <span className="ref big">{item.ref.split('/')[1]}</span>
             {editing === 'title' ? (
               <form
                 onSubmit={(e) => {
@@ -92,7 +93,7 @@ export default function ItemPage() {
               </div>
               {tasks.length === 0 && <p className="muted">Break this issue into tasks and assign them to people or agents.</p>}
               <ul className="rows">
-                {tasks.map((t: any) => (
+                {inWorkOrder(tasks).map((t: any) => (
                   <li key={t.ref} className={t.done ? 'done' : ''}>
                     <span className={`check ${t.done ? 'on' : ''}`}>{t.done ? '✓' : ''}</span>
                     <RefLink refStr={t.ref} />
@@ -435,4 +436,24 @@ function LinkModal({ fromRef, onClose, onDone }: { fromRef: string; onClose: () 
       </form>
     </Modal>
   );
+}
+
+/**
+ * Tasks in the order work happens: finished ones first, then open ones so that a blocker always comes
+ * before what it blocks (ties by number).
+ */
+function inWorkOrder<T extends { ref: string; done: boolean; blockedBy?: string[] | null }>(tasks: T[]): T[] {
+  const done = tasks.filter((t) => t.done);
+  const open = tasks.filter((t) => !t.done);
+  const refs = new Set(open.map((t) => t.ref));
+  const waitsOn = new Map(open.map((t) => [t.ref, (t.blockedBy ?? []).filter((b) => refs.has(b))]));
+  const out: T[] = [];
+  const placed = new Set<string>();
+  while (out.length < open.length) {
+    const next = open.find((t) => !placed.has(t.ref) && waitsOn.get(t.ref)!.every((b) => placed.has(b)))
+      ?? open.find((t) => !placed.has(t.ref))!; // a cycle: keep going in number order
+    out.push(next);
+    placed.add(next.ref);
+  }
+  return [...done, ...out];
 }
