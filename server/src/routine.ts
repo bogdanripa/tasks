@@ -123,6 +123,8 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
       return `${d.ref} ${q(d.title ?? '')}, which blocked this, is done`;
     case 'triggered_item_done':
       return `${d.ref} ${q(d.title ?? '')}, which this triggered, is done`;
+    case 'stalled':
+      return `Tasks' watchdog: this has been in "${d.status}" for ${d.idleMinutes} minutes with nothing happening (maybe your last run was cut off). Pick it up where you left off, or report what's blocking you and ask a human if you need one. If it's actually finished, set its status.`;
     case 'all_tasks_done':
       return `all tasks under this issue are done (last: ${d.ref})`;
     default:

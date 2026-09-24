@@ -5,6 +5,9 @@ import { config } from './config.js';
 import type { Actor } from './auth.js';
 import { inbox } from './domain.js';
 import { processRoutineQueue, sweepStaleRuns, type Pending } from './routine.js';
+import { recoverInterruptedRuns } from './runtime.js';
+
+const QUEUE_LOCK = 72_451_001; // pg advisory lock id for the delivery queue
 
 const MAX_ATTEMPTS = 8;
 const BATCH = 20;
@@ -115,16 +118,31 @@ export function startDeliveryWorker() {
       return;
     }
     running = true;
+    // One Tasks process delivers at a time (a rolling deploy briefly runs two), or both could start the same run.
+    let lock: Awaited<ReturnType<typeof sql.reserve>> | undefined;
     try {
-      await sweepStaleRuns(); // release runs that crashed or never reached Tasks before looking at queues
-      do {
-        again = false;
-        while ((await deliverDue()) === BATCH);
-      } while (again);
+      lock = await sql.reserve();
+      const [{ ok }] = await lock`select pg_try_advisory_lock(${QUEUE_LOCK}) as ok`;
+      if (!ok) {
+        clearTimeout(wake);
+        wake = setTimeout(tick, 5_000); // the other process has it; look again shortly
+        return;
+      }
+      try {
+        await sweepStaleRuns(); // release runs that crashed or never reached Tasks before looking at queues
+        await recoverInterruptedRuns();
+        do {
+          again = false;
+          while ((await deliverDue()) === BATCH);
+        } while (again);
+      } finally {
+        await lock`select pg_advisory_unlock(${QUEUE_LOCK})`;
+      }
       await scheduleWake();
     } catch (e) {
       console.error('delivery worker', e);
     } finally {
+      lock?.release();
       running = false;
     }
   };

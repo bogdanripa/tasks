@@ -842,6 +842,28 @@ assert.equal(looseNow.item.assigneeKind, 'human');
 assert.ok(looseNow.history.some((e: any) => e.data?.byReply));
 console.log('✓ replying on an unassigned item assigns it to the person');
 
+// ---- Watchdog: a stalled item gets two nudges, then the project's creator is pinged, once ----
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
+const stalledItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Stalls forever', status: 'Todo', assignee: house.agent.id });
+await runFor(stalledItem.ref); // fake-idle ends without setting a status: the item just sits there
+const stuckId = (await api('GET', `/api/items/${stalledItem.ref}`)).item.id;
+const runsOn = async () => (await api('GET', `/api/agents/${house.agent.id}`)).runs.filter((r: any) => r.itemRef === stalledItem.ref);
+for (const n of [2, 3]) {
+  await api('POST', '/dev/watchdog', { itemId: stuckId, stallSeconds: 0 });
+  for (let i = 0; i < 100 && (await runsOn()).filter((r: any) => r.finishedAt).length < n; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal((await runsOn()).filter((r: any) => r.finishedAt).length, n, `nudge ${n - 1} starts a run`);
+}
+const nudgePrompt = (await api('GET', `/api/runs/${(await runsOn())[0].id}`)).steps.find((s: any) => s.kind === 'prompt').content.text;
+assert.match(nudgePrompt, /watchdog: this has been in "Todo"/);
+await api('POST', '/dev/watchdog', { itemId: stuckId, stallSeconds: 0 }); // third time: ping the human
+await api('POST', '/dev/watchdog', { itemId: stuckId, stallSeconds: 0 }); // only once
+const stuckHistory = (await api('GET', `/api/items/${stalledItem.ref}`)).history.map((e: any) => e.type);
+assert.equal(stuckHistory.filter((t: string) => t === 'watchdog.nudged').length, 2);
+assert.equal(stuckHistory.filter((t: string) => t === 'watchdog.escalated').length, 1);
+const wdInbox = await api('GET', '/api/inbox');
+assert.ok(JSON.stringify(wdInbox).includes('watchdog.escalated'), 'the project creator is pinged in their inbox');
+console.log('✓ watchdog: stalled item nudged twice, then the project creator pinged once');
+
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
 assert.equal((await api('GET', `/api/agents/${house.agent.id}`)).agent.runtime, null);

@@ -1,3 +1,4 @@
+import { startWatchdog } from './watchdog.js';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import fstatic from '@fastify/static';
@@ -65,6 +66,7 @@ await migrate();
 await recoverInterruptedRuns(); // in-house runs cut short by the last restart are queued again
 startDeliveryWorker();
 startScheduler();
+startWatchdog();
 // '::' is dual-stack in Node: a container healthcheck may use ::1 while a proxy uses IPv4.
 await app.listen({ port: config.port, host: process.env.HOST || '::' });
 console.log(`tasks listening on :${config.port}`);

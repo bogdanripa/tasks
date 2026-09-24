@@ -13,6 +13,7 @@ import * as llm from './llm.js';
 import * as github from './github.js';
 import * as connectors from './connectors.js';
 import * as values from './projectValues.js';
+import { watchdogTick } from './watchdog.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
@@ -133,6 +134,16 @@ export function apiRoutes(app: FastifyInstance) {
   });
 
   // ---- GitHub ----
+  // Local tests only: run one watchdog pass on one item, in this process (so its notifications wake the queue).
+  if (!config.production) {
+    app.post('/dev/watchdog', async (req) => {
+      await requireActor(req);
+      const { itemId, stallSeconds } = req.body as { itemId: string; stallSeconds?: number };
+      await watchdogTick({ itemId, stallSeconds });
+      return { ok: true };
+    });
+  }
+
   // ---- project values ----
   route(app, 'GET', '/api/projects/:org/:key/values', { section: 'Projects', summary: 'the project’s shared values (key/value notes like staging_url; any member)' }, async (req) =>
     values.listValues(await requireActor(req), `${req.params.org}/${req.params.key}`),

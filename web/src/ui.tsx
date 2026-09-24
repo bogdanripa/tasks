@@ -141,6 +141,10 @@ export function describe(e: Event, showItem: boolean): ReactNode {
       return d.before === null ? <>set <code>{d.key}</code> to <span className="excerpt">{d.value}</span></> : <>changed <code>{d.key}</code> to <span className="excerpt">{d.value}</span></>;
     case 'project.value_deleted':
       return <>deleted the value <code>{d.key}</code></>;
+    case 'watchdog.nudged':
+      return <>was nudged by the watchdog{showItem && <> on {item}</>}: stalled in <b>{d.status}</b> for {d.idleMinutes} min (nudge {d.nudge})</>;
+    case 'watchdog.escalated':
+      return <>needs a human{showItem && <> on {item}</>}, says the watchdog: stalled in <b>{d.status}</b> for {d.idleMinutes} min, {d.why}</>;
     case 'github.connected':
       return <>connected GitHub (<b>{d.account}</b>)</>;
     case 'github.pull_request':

@@ -36,6 +36,12 @@ export const config = {
     allowLoopback: process.env.BROWSER_ALLOW_LOOPBACK === '1',
     maxSessions: Number(process.env.BROWSER_MAX_SESSIONS ?? 2),
   },
+  // Watchdog: an agent's item with no run, nothing queued and no activity for this long counts as stalled.
+  watchdog: {
+    stallSeconds: Number(process.env.WATCHDOG_STALL_SECONDS ?? 1800),
+    intervalSeconds: Number(process.env.WATCHDOG_INTERVAL_SECONDS ?? 300),
+    maxNudges: 2,
+  },
   secretsKey: process.env.SECRETS_KEY ?? (process.env.NODE_ENV === 'production' ? '' : 'dev-only-insecure-secrets-key'),
 };
 if (!config.secretsKey) throw new Error('SECRETS_KEY is required in production');

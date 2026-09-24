@@ -20,6 +20,8 @@ const RUN_TIMEOUT_MS = 30 * 60_000;
 const MAX_TOOL_OUTPUT = 20_000;
 const MAX_ATTEMPTS = 3;
 let active = 0;
+/** Runs this process is executing (never taken for dead here, however quiet). */
+const mine = new Set<string>();
 
 export const inHouseFull = () => active >= MAX_CONCURRENT;
 
@@ -331,6 +333,7 @@ export type InHouseRun = {
 /** Start an in-house run in the background. The caller has recorded the run and marked its updates delivered. */
 export function startInHouse(run: InHouseRun) {
   active++;
+  mine.add(run.runId);
   void execute(run)
     .catch(async (e) => {
       console.error('in-house run', run.runId, e);
@@ -338,6 +341,7 @@ export function startInHouse(run: InHouseRun) {
     })
     .finally(() => {
       active--;
+      mine.delete(run.runId);
       bus.emit('pulse'); // a slot is free
     });
 }
@@ -478,17 +482,23 @@ async function fail(run: InHouseRun, error: string, retry: boolean) {
 }
 
 /**
- * On startup: in-house runs that were in flight when the server stopped (e.g. a deploy) are closed and
- * their updates queued again, so the work is retried rather than lost.
+ * In-house runs whose process died (a deploy, a crash) are released and their updates queued again. A run is
+ * only taken for dead after a few minutes without a step, since during a rolling deploy the old process may
+ * still be running it. Called at startup and by the delivery worker's sweep.
  */
+const DEAD_AFTER_MINUTES = 10;
 export async function recoverInterruptedRuns() {
-  const runs = await sql`select id, agent_id, key_id, notification_ids from agent_runs where runtime = 'builtin' and status = 'fired' and finished_at is null`;
+  const runs = await sql`
+    select r.id, r.agent_id, r.key_id, r.notification_ids from agent_runs r
+    where r.runtime = 'builtin' and r.status = 'fired' and r.finished_at is null
+      and greatest(r.created_at, (select max(s.created_at) from run_steps s where s.run_id = r.id)) < now() - ${DEAD_AFTER_MINUTES + ' minutes'}::interval`;
   for (const r of runs) {
+    if (mine.has(r.id)) continue;
     if (r.notificationIds.length) {
       await sql`update notifications set delivery_status = 'pending', next_attempt_at = now() where id in ${sql(r.notificationIds.map(Number))}`;
     }
-    await sql`insert into run_steps (run_id, kind, content) values (${r.id}, 'error', ${sql.json({ text: 'Interrupted by a restart of Tasks; the work was queued again.' })})`;
-    await releaseRun({ id: r.id, agentId: r.agentId, itemId: null, keyId: r.keyId }, 'interrupted by a restart; queued again');
+    await sql`insert into run_steps (run_id, kind, content) values (${r.id}, 'error', ${sql.json({ text: 'The run stopped (Tasks restarted or crashed); the work was queued again.' })})`;
+    await releaseRun({ id: r.id, agentId: r.agentId, itemId: null, keyId: r.keyId }, 'stopped by a restart or crash; queued again');
   }
   if (runs.length) console.log(`recovered ${runs.length} interrupted in-house run(s)`);
 }

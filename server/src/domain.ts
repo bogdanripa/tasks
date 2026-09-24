@@ -101,6 +101,18 @@ export async function resolveMember(orgId: string, who: string, db: Db = sql): P
 
 type EventInput = { orgId: string; projectId?: string | null; itemId?: string | null; actorId: string; type: string; data?: Row };
 
+/**
+ * The watchdog's two moves on a stalled item: nudge its agent (a run that says so), or ping a human. Both go in
+ * the item's history, recorded as the agent (the watchdog has no account of its own).
+ */
+export async function watchdogSignal(item: { id: string; orgId: string; projectId: string }, agent: { id: string; name: string }, to: { id: string }, data: Row) {
+  const actor: Actor = { id: agent.id, kind: 'agent', name: agent.name, email: null, orgId: item.orgId };
+  return mutate(async (tx) => {
+    const ev = await emit(tx, { orgId: item.orgId, projectId: item.projectId, itemId: item.id, actorId: agent.id, type: to.id === agent.id ? 'watchdog.nudged' : 'watchdog.escalated', data });
+    await notify(tx, to.id, ev, item.id, 'stalled', actor);
+  });
+}
+
 /** For background workers (e.g. routine runs) that need to write to an item's history. */
 export async function recordEvent(e: EventInput) {
   return mutate((tx) => emit(tx, e));
@@ -118,7 +130,7 @@ async function emit(tx: Db, e: EventInput): Promise<number> {
  * Workflow notifications that matter even when you caused them: a task you routed to yourself, a
  * blocker you finished, the last task under your issue. (Edits and comments you make never wake you.)
  */
-const SELF_NOTIFY = new Set(['assigned', 'unblocked', 'all_tasks_done', 'triggered_item_done']);
+const SELF_NOTIFY = new Set(['assigned', 'unblocked', 'all_tasks_done', 'triggered_item_done', 'stalled']);
 
 async function notify(tx: Db, accountId: string | null | undefined, eventId: number, itemId: string | null, reason: string, actor: Actor) {
   if (!accountId) return;
