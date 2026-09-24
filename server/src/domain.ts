@@ -145,10 +145,11 @@ export function normalizeSkill(raw: string) {
 export const SUGGESTED_SKILLS = ['product', 'architecture', 'db', 'backend', 'frontend', 'qa', 'design', 'devops'];
 
 /** The org member with this skill who has the fewest open items (ties: longest-standing member). */
-async function pickBySkill(tx: Db, orgId: string, skill: string) {
+async function pickBySkill(tx: Db, orgId: string, skill: string, exclude: string | null = null) {
   const [m] = await tx`
     select a.id, a.name from memberships m join accounts a on a.id = m.account_id
     where m.org_id = ${orgId} and ${skill} = any(m.skills) and a.deactivated_at is null
+      ${exclude ? tx`and a.id <> ${exclude}` : tx``}
     order by (select count(*) from items i join projects p on p.id = i.project_id
               where p.org_id = ${orgId} and i.assignee_id = a.id and i.closed_at is null), m.created_at
     limit 1`;
@@ -173,6 +174,41 @@ async function routeItem(tx: Db, actor: Actor, itemId: string) {
     data: { ref: item.ref, title: item.title, changes: { assignee: [null, member.name] }, routedBy: skill },
   });
   await notify(tx, member.id, ev, itemId, 'assigned', actor);
+}
+
+/**
+ * Review hand-off. A task entering a hand-off column (e.g. Review → skill "review") goes to the least
+ * busy member with that skill other than its author; sent back out of it to anything but done, it
+ * returns to the author. Issues aren't handed off: they stay with their owner.
+ */
+async function handOff(tx: Db, actor: Actor, itemId: string, from: string, to: string, handoffs: Record<string, string>, done: string) {
+  const [cur] = await tx`select * from item_view where id = ${itemId}`;
+  if (!cur || cur.type !== 'task') return;
+  if (handoffs[to] && !handoffs[from]) {
+    const reviewer = await pickBySkill(tx, cur.orgId, handoffs[to], cur.assigneeId);
+    if (!reviewer) return; // nobody else has the skill: it stays with its author, who sees no reviewer took it
+    await tx`update items set assignee_id = ${reviewer.id}, handed_off_from = ${cur.assigneeId} where id = ${itemId}`;
+    const ev = await emit(tx, {
+      orgId: cur.orgId, projectId: cur.projectId, itemId, actorId: actor.id, type: 'item.updated',
+      data: { ref: cur.ref, title: cur.title, changes: { assignee: [cur.assigneeName, reviewer.name] }, handoff: handoffs[to] },
+    });
+    await notify(tx, reviewer.id, ev, itemId, 'review_requested', actor);
+  } else if (handoffs[from] && !handoffs[to]) {
+    if (to === done || !cur.handedOffFrom) {
+      await tx`update items set handed_off_from = null where id = ${itemId}`;
+      return;
+    }
+    const [author] = await tx`
+      select a.id, a.name from accounts a join memberships m on m.account_id = a.id and m.org_id = ${cur.orgId}
+      where a.id = ${cur.handedOffFrom} and a.deactivated_at is null`;
+    await tx`update items set handed_off_from = null ${author ? tx`, assignee_id = ${author.id}` : tx``} where id = ${itemId}`;
+    if (!author) return;
+    const ev = await emit(tx, {
+      orgId: cur.orgId, projectId: cur.projectId, itemId, actorId: actor.id, type: 'item.updated',
+      data: { ref: cur.ref, title: cur.title, changes: { assignee: [cur.assigneeName, author.name] }, returned: true },
+    });
+    await notify(tx, author.id, ev, itemId, 'changes_requested', actor);
+  }
 }
 
 /** Route every open, unassigned item in an org (or one project) that some skill could now place. */
@@ -463,7 +499,7 @@ export async function updateOrg(actor: Actor, slug: string, patch: { name?: stri
   });
 }
 
-type ColumnEdit = { name: string; from?: string | null; skill?: string | null };
+type ColumnEdit = { name: string; from?: string | null; skill?: string | null; handoff?: string | null };
 
 /**
  * Admin edits to a project. Columns come as the full new list; `from` names the existing column a row
@@ -480,6 +516,7 @@ export async function updateProject(
   const old: string[] = project.columns;
   let columns: string[] | undefined;
   let columnSkills: Record<string, string> | undefined;
+  let columnHandoffs: Record<string, string> | undefined;
   const renames: [string, string][] = [];
   if (patch.columns) {
     columns = patch.columns.map((c) => c.name.trim());
@@ -487,6 +524,8 @@ export async function updateProject(
     if (columns.some((c) => !c)) throw badRequest('Column names can’t be empty');
     if (new Set(columns.map((c) => c.toLowerCase())).size !== columns.length) throw badRequest('Column names must be unique');
     columnSkills = Object.fromEntries(patch.columns.filter((c) => c.skill).map((c) => [c.name.trim(), normalizeSkill(c.skill!)]));
+    columnHandoffs = Object.fromEntries(patch.columns.filter((c) => c.handoff).map((c) => [c.name.trim(), normalizeSkill(c.handoff!)]));
+    if (columnHandoffs[columns[columns.length - 1]]) throw badRequest('The done column can’t hand off work');
     const kept = new Set(patch.columns.map((c) => c.from).filter(Boolean) as string[]);
     for (const c of patch.columns) {
       if (c.from && !old.includes(c.from)) throw badRequest(`Unknown column "${c.from}"`);
@@ -517,7 +556,8 @@ export async function updateProject(
         description = coalesce(${patch.description ?? null}, description),
         guidelines = coalesce(${patch.guidelines ?? null}, guidelines),
         columns = ${columns ? tx`${columns}` : tx`columns`},
-        column_skills = ${columnSkills ? tx.json(columnSkills) : tx`column_skills`}
+        column_skills = ${columnSkills ? tx.json(columnSkills) : tx`column_skills`},
+        column_handoffs = ${columnHandoffs ? tx.json(columnHandoffs) : tx`column_handoffs`}
       where id = ${project.id} returning *`;
     const changes: Record<string, unknown> = {};
     if (patch.name !== undefined && patch.name.trim() !== project.name) changes.name = [project.name, patch.name.trim()];
@@ -525,6 +565,7 @@ export async function updateProject(
     if (patch.guidelines !== undefined && patch.guidelines !== project.guidelines) changes.guidelines = true;
     if (columns && columns.join('\n') !== old.join('\n')) changes.columns = [old, columns];
     if (columnSkills && JSON.stringify(columnSkills) !== JSON.stringify(project.columnSkills ?? {})) changes.columnSkills = columnSkills;
+    if (columnHandoffs && JSON.stringify(columnHandoffs) !== JSON.stringify(project.columnHandoffs ?? {})) changes.columnHandoffs = columnHandoffs;
     if (columnSkills) await routeUnassigned(tx, actor, { projectId: project.id }); // new defaults may place waiting items
     if (Object.keys(changes).length) {
       await emit(tx, { orgId: project.orgId, projectId: project.id, actorId: actor.id, type: 'project.updated', data: { changes } });
@@ -567,9 +608,10 @@ export async function createProject(
     const [dupe] = await tx`select 1 from projects where org_id = ${org.id} and key = ${key}`;
     if (dupe) throw badRequest(`Project key ${key} already exists`);
     const [p] = await tx`
-      insert into projects (org_id, key, name, description, guidelines, column_skills ${columns ? tx`, columns` : tx``})
+      insert into projects (org_id, key, name, description, guidelines, column_skills, column_handoffs ${columns ? tx`, columns` : tx``})
       values (${org.id}, ${key}, ${input.name}, ${input.description ?? ''}, ${forAgents ? PIPELINE_TEMPLATE : ''},
-              ${tx.json(forAgents ? { Todo: 'product' } : {})} ${columns ? tx`, ${columns}` : tx``})
+              ${tx.json(forAgents ? { Todo: 'product' } : {})}, ${tx.json(forAgents ? { Review: 'review' } : {})}
+              ${columns ? tx`, ${columns}` : tx``})
       returning *`;
     await emit(tx, { orgId: org.id, projectId: p.id, actorId: actor.id, type: 'project.created', data: { key, name: p.name, setup: forAgents ? 'agents' : 'blank' } });
     return { ...p, orgSlug: org.slug };
@@ -728,6 +770,12 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     throw badRequest(`Unknown status "${patch.status}". Columns: ${project.columns.join(', ')}`);
   }
   if (patch.title !== undefined && !patch.title.trim()) throw badRequest('Title cannot be empty');
+  if (actor.kind === 'agent' && item.type === 'issue' && patch.status === doneColumn(project) && item.status !== patch.status) {
+    const open = await sql`select ref from item_view where parent_id = ${item.id} and closed_at is null order by number`;
+    if (open.length) {
+      throw badRequest(`${item.ref} still has open tasks (${open.map((o) => o.ref).join(', ')}). Close the issue after they’re done: Tasks tells you when the last one is, for the definition-of-done check.`);
+    }
+  }
 
   await mutate(async (tx) => {
     const assignee = patch.assignee ? await resolveMember(item.orgId, patch.assignee, tx) : patch.assignee === null ? null : undefined;
@@ -776,6 +824,8 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
 
     // A new column or skill may place an unassigned item; an explicit unassign is respected.
     if ((changes.status || changes.skill) && patch.assignee === undefined) await routeItem(tx, actor, item.id);
+    // Review hand-off (and hand-back); an explicit assignment in the same change wins.
+    if (changes.status && patch.assignee === undefined) await handOff(tx, actor, item.id, item.status, status, project.columnHandoffs ?? {}, done);
 
     if (changes.status && status === done) {
       // Wake whoever was waiting on this: items it blocks, items that triggered it, and its issue when all tasks are done.
@@ -797,6 +847,15 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     }
   });
   return resolveItem(actor, item.id);
+}
+
+/** A run says it's done without changing its task's status (e.g. an issue that now waits on its tasks). */
+export async function endRun(actor: Actor) {
+  if (!actor.keyId) throw badRequest('Only a routine run (its run token) can end a run');
+  const [run] = await sql`select item_id from agent_runs where key_id = ${actor.keyId} and finished_at is null`;
+  if (!run) return { ended: false };
+  await mutate((tx) => finishRun(tx, actor.id, actor.keyId!, run.itemId));
+  return { ended: true };
 }
 
 async function finishRun(tx: Db, agentId: string, keyId: string, itemId: string) {

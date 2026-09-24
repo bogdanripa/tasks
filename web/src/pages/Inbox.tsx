@@ -12,6 +12,8 @@ const REASONS: Record<string, string> = {
   all_tasks_done: 'finished the last task on your issue',
   task_added: 'added a task to your issue',
   done: 'finished an item you created',
+  review_requested: 'asked you to review',
+  changes_requested: 'requested changes on your work',
   updated: 'changed an item assigned to you',
   linked: 'linked an item assigned to you',
 };

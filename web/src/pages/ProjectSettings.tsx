@@ -9,7 +9,7 @@ import { SchedulesSection } from './Schedules';
 
 const PROJECT_TABS = ['general', 'guidelines', 'board', 'recurring'] as const;
 
-type Column = { name: string; from: string | null; count: number; skill: string };
+type Column = { name: string; from: string | null; count: number; skill: string; handoff: string };
 
 export default function ProjectSettings() {
   const { org, key } = useParams();
@@ -81,9 +81,10 @@ export default function ProjectSettings() {
       {tab === 'board' && (
       <section>
         <ColumnsEditor
-          key={project.columns.join('|') + JSON.stringify(project.columnSkills)}
+          key={project.columns.join('|') + JSON.stringify(project.columnSkills) + JSON.stringify(project.columnHandoffs)}
           columns={project.columns}
           columnSkills={project.columnSkills ?? {}}
+          columnHandoffs={project.columnHandoffs ?? {}}
           skills={orgSkills}
           items={items}
           onSave={(columns) => update({ columns })}
@@ -128,16 +129,20 @@ export default function ProjectSettings() {
 function ColumnsEditor(props: {
   columns: string[];
   columnSkills: Record<string, string>;
+  columnHandoffs: Record<string, string>;
   skills: string[];
   items: any[];
-  onSave: (c: { name: string; from: string | null; skill: string | null }[]) => Promise<unknown>;
+  onSave: (c: { name: string; from: string | null; skill: string | null; handoff: string | null }[]) => Promise<unknown>;
 }) {
-  const { columns, columnSkills, items, onSave } = props;
-  const initial = (): Column[] => columns.map((c) => ({ name: c, from: c, count: items.filter((i) => i.status === c).length, skill: columnSkills[c] ?? '' }));
+  const { columns, columnSkills, columnHandoffs, items, onSave } = props;
+  const initial = (): Column[] =>
+    columns.map((c) => ({ name: c, from: c, count: items.filter((i) => i.status === c).length, skill: columnSkills[c] ?? '', handoff: columnHandoffs[c] ?? '' }));
   const [rows, setRows] = useState<Column[]>(initial);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const dirty = JSON.stringify(rows.map((r) => [r.name, r.from, r.skill.trim()])) !== JSON.stringify(columns.map((c) => [c, c, columnSkills[c] ?? '']));
+  const dirty =
+    JSON.stringify(rows.map((r) => [r.name, r.from, r.skill.trim(), r.handoff.trim()])) !==
+    JSON.stringify(columns.map((c) => [c, c, columnSkills[c] ?? '', columnHandoffs[c] ?? '']));
   const set = (i: number, patch: Partial<Column>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const move = (i: number, d: number) => {
     const next = [...rows];
@@ -150,7 +155,8 @@ function ColumnsEditor(props: {
       <p className="muted small">
         Left to right. The <b>last column means done</b>; a column named “In progress” (or Doing, WIP, Working) is where agents put work they’ve
         started, and items in “Backlog” don’t ping agents. A <b>default skill</b> sends unassigned items in that column to the least busy member with it
-        (e.g. Todo → product). Renaming a column keeps its items in it. A column must be empty before you remove it.
+        (e.g. Todo → product). <b>Hand off to</b> reassigns tasks moved into the column to a member with that skill who isn’t their author
+        (e.g. Review → review), and sends them back to the author if they’re moved out again. Renaming a column keeps its items in it. A column must be empty before you remove it.
       </p>
       <ol className="columns-editor">
         {rows.map((r, i) => (
@@ -165,6 +171,16 @@ function ColumnsEditor(props: {
               title="Unassigned items in this column go to a member with this skill"
               onChange={(e) => set(i, { skill: e.target.value })}
               aria-label={`Column ${i + 1} default skill`}
+            />
+            <input
+              className="col-skill"
+              list="column-skill-suggestions"
+              value={r.handoff}
+              placeholder="hand off to"
+              title="Tasks moved into this column are handed to a member with this skill (not their author), e.g. Review → review. Sent back, they return to the author."
+              onChange={(e) => set(i, { handoff: e.target.value })}
+              aria-label={`Column ${i + 1} hand-off skill`}
+              disabled={i === rows.length - 1}
             />
             <span className="muted small col-meta">
               {r.from === null ? 'new' : `${r.count} item${r.count === 1 ? '' : 's'}`}
@@ -187,7 +203,7 @@ function ColumnsEditor(props: {
       <datalist id="column-skill-suggestions">{props.skills.map((s) => <option key={s} value={s} />)}</datalist>
       <ErrorNote error={error} />
       <div className="actions">
-        <button className="ghost small grow-left" onClick={() => setRows([...rows, { name: '', from: null, count: 0, skill: '' }])} disabled={rows.length >= 12}>
+        <button className="ghost small grow-left" onClick={() => setRows([...rows, { name: '', from: null, count: 0, skill: '', handoff: '' }])} disabled={rows.length >= 12}>
           + Add column
         </button>
         {dirty && <button className="ghost small" onClick={() => { setRows(initial()); setError(null); }}>Reset</button>}
@@ -196,7 +212,7 @@ function ColumnsEditor(props: {
           disabled={!dirty}
           onClick={async () => {
             try {
-              await onSave(rows.map((r) => ({ name: r.name.trim(), from: r.from, skill: r.skill.trim() || null })));
+              await onSave(rows.map((r) => ({ name: r.name.trim(), from: r.from, skill: r.skill.trim() || null, handoff: r.handoff.trim() || null })));
               setError(null);
               setSaved(true);
               setTimeout(() => setSaved(false), 1500);

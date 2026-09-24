@@ -101,6 +101,10 @@ function describeChange(c: Record<string, any>): string {
     case 'linked':
     case 'unlinked':
       return `${who} ${c.reason === 'linked' ? 'linked' : 'removed the link'}: ${d.from} ${d.kind} ${d.to}`;
+    case 'review_requested':
+      return `${who} finished it and moved it to review: it's yours to review`;
+    case 'changes_requested':
+      return `${who} reviewed it and sent it back to you with changes requested (see their comment)`;
     case 'unblocked':
       return `${d.ref} ${q(d.title ?? '')}, which blocked this, is done`;
     case 'triggered_item_done':
@@ -114,6 +118,8 @@ function describeChange(c: Record<string, any>): string {
 
 function buildPayload(p: {
   working?: string;
+  reviewColumn?: string;
+  dodCheck?: boolean;
   agentName: string;
   item: Record<string, any>;
   project: Record<string, any>;
@@ -142,8 +148,14 @@ How to work (from Tasks):
 1. ${p.working ? `Move the task to "${p.working}" first, so people see you're on it: PATCH /api/items/${item.ref} {"status":"${p.working}"}. That doesn't end your run.` : 'This board has no in-progress column, so start right away.'}
 2. Read the task, including comments and links: curl -s ${auth} $TASKS/api/items/${item.ref}
 3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
-4. Comment with what you did, then set its status: "${done}" when finished, or another column (e.g. for review). Any status other than "${p.working ?? '-'}" ends your run.
-5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.
+4. Comment with what you did, then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Tasks hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run with POST /api/runs/end.
+5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn ? `
+Reviewing: a task in "${p.reviewColumn}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
+
+ALL TASKS UNDER THIS ISSUE ARE DONE. This run is the definition-of-done check:
+- Check the result against the spec's acceptance criteria and the definition of done in the project guidelines.
+- Anything missing or wrong: create a task for it (with a skill), comment what's missing, and end the run. You'll be woken when it's done.
+- Everything passes: deliver as the project guidelines say (pull request or merge), comment what shipped with the link, and move the issue to "${done}".` : ''}
 To hand work to others, create tasks under the issue with a "skill" and no assignee; Tasks gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
 If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines. Never put the API token in comments.
 
@@ -265,7 +277,7 @@ async function fireRoutine(rows: Pending[]) {
   const ids = rows.map((r) => r.id);
   const [item] = await sql`select * from item_view where id = ${first.itemId}`;
   const [project] = await sql`
-    select p.key, p.name, p.columns, p.guidelines, o.guidelines as org_guidelines
+    select p.key, p.name, p.columns, p.column_handoffs, p.guidelines, o.guidelines as org_guidelines
     from projects p join orgs o on o.id = p.org_id where p.id = ${item.projectId}`;
   const [parent] = item.parentId ? await sql`select ref, title from item_view where id = ${item.parentId}` : [];
   const changes = await sql`
@@ -278,6 +290,8 @@ async function fireRoutine(rows: Pending[]) {
   const key = await mintApiKey(first.agentId, `run ${item.ref}`, expiresAt);
   const text = buildPayload({
     working: workingColumn(project.columns),
+    reviewColumn: Object.keys(project.columnHandoffs ?? {})[0],
+    dodCheck: item.type === 'issue' && rows.some((r) => r.reason === 'all_tasks_done'),
     orgGuidelines: project.orgGuidelines,
     team: [...(await sql`
       select a.name, a.kind, m.skills from memberships m join accounts a on a.id = m.account_id

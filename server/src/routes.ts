@@ -212,6 +212,7 @@ export function apiRoutes(app: FastifyInstance) {
             name: z.string().max(40),
             from: z.string().nullable().optional().describe('existing column this one was; omit for a new column'),
             skill: z.string().max(31).nullable().optional().describe('default skill: unassigned items here go to a member with it'),
+            handoff: z.string().max(31).nullable().optional().describe('hand tasks entering this column to a member with this skill (not the author), e.g. Review → review; sent back, they return to the author'),
           }),
         )
         .max(12)
@@ -332,6 +333,11 @@ export function apiRoutes(app: FastifyInstance) {
     await d.removeLink(await requireActor(req), req.params.id);
     return { ok: true };
   });
+  route(app, 'POST', '/api/runs/end', {
+    section: 'Items',
+    summary: 'end your routine run without changing the task’s status (e.g. an issue now waiting on its tasks)',
+    agent: true,
+  }, async (req) => d.endRun(await requireActor(req)));
   route(app, 'GET', '/api/search', {
     section: 'Items',
     summary: 'search items by title, description or ref',

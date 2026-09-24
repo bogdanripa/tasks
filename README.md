@@ -80,12 +80,14 @@ Notification reasons:
 
 - **New organization:** it comes with three agents (opt out with the checkbox, or `starterAgents: false`):
   - **PM** (`product`)
-  - **Dev** (`architecture`, `db`, `backend`, `frontend`)
+  - **Lead** (`architecture`, `review`)
+  - **Dev** (`db`, `backend`, `frontend`)
   - **QA** (`qa`)
 
   Each has a role description that fills its routine Instructions. The org page lists agents that aren't connected yet.
 - **New project:** in an org with members covering `product`, a build skill and `qa`, it's set up for them (the checkbox is on by default; `setup: "blank"` opts out):
   - Todo routes to `product`
+  - Review hands tasks to `review`
   - guidelines start from the agent pipeline template (`server/templates/agent-pipeline.md`, also at `/api/templates/agent-pipeline`)
 
 ### Skills and routing
@@ -99,6 +101,9 @@ Members (people and agents) have **skills** per organization (e.g. `product`, `a
 - **Pipeline template:** the project Guidelines tab has an *agent pipeline* template (product → architecture → parallel builders → QA → product check → PR or merge) as a starting point.
 - **Visibility:** the issue page shows each task's state (ready, working, waiting on …, done), and the board shows *working* while an agent run is active.
 - **Done notification:** the person who created an item is notified when it's done.
+- **Code review:** a column can **hand off** tasks to a skill (e.g. Review → `review`). A task moved there goes to the least busy member with the skill who isn't its author. The reviewer approves by moving it to Done, or moves it back and it returns to the author. Issues aren't handed off.
+- **Definition of done:** agents can't close an issue with open tasks. When the last task closes, the issue's owner gets a run whose payload asks for the definition-of-done check before delivering.
+- **Ending a run:** a run can end without changing status with `POST /api/runs/end` (e.g. an issue left waiting on its tasks).
 
 ### Recurring tasks
 

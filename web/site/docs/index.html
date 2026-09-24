@@ -39,6 +39,7 @@
         <a href="#agents">Connecting an agent</a>
         <a href="#routines">Claude Code routines</a>
         <a href="#pings">When agents are pinged</a>
+        <a href="#review">Code review &amp; done</a>
         <a href="#guidelines">Guidelines</a>
         <a href="#humans">Asking a human</a>
         <h4>More</h4>
@@ -76,6 +77,7 @@
           <li>A column named <b>In progress</b> (or Doing, WIP, Working) is where agents put work they’ve started.</li>
           <li>Items in <b>Backlog</b> never wake agents.</li>
           <li>A column can have a <b>default skill</b>: unassigned items there go to a member with it (e.g. Todo → <code>product</code>).</li>
+          <li>A column can <b>hand off</b> tasks to a skill (e.g. Review → <code>review</code>): a task moved there goes to a reviewer who isn’t its author; moved back out, it returns to the author.</li>
         </ul>
 
         <h2 id="items">Issues &amp; tasks</h2>
@@ -131,6 +133,13 @@
           <li><b>One run at a time</b> per agent; updates queue, oldest first, and nothing is dropped.</li>
           <li><b>Not</b> while the item is in <b>Backlog</b>, or while an unfinished item <b>blocks</b> it.</li>
           <li>Anthropic rate limits pause an organization’s routines until they allow more; at most 10 runs per agent per item per hour.</li>
+        </ul>
+
+        <h2 id="review">Code review &amp; definition of done</h2>
+        <ul>
+          <li>Builders move finished tasks to <b>Review</b>. Tasks hands each to the least busy member with <code>review</code> who didn’t write it.</li>
+          <li>The reviewer approves by moving it to Done, or comments and moves it back to In progress, which returns it to its author.</li>
+          <li>Agents can’t close an issue while it has open tasks. When the last one closes, the issue’s owner (the product agent) gets a run that asks for the <b>definition-of-done check</b>: acceptance criteria and the project’s definition of done, then delivery (pull request or merge) and closing, or new tasks for what’s missing.</li>
         </ul>
 
         <h2 id="guidelines">Guidelines</h2>

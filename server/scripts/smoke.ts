@@ -307,6 +307,19 @@ assert.match(fires[6].text, new RegExp(`Task: ${r3.ref}`));
 assert.match(fires[6].text, /"Share vault access", which blocked this, is done/);
 console.log('✓ blocked tasks don\'t wake agents; the last blocker finishing does');
 
+// A run can end without a status change; an issue's last task finishing starts its owner's DoD check.
+assert.deepEqual(await api('POST', '/api/runs/end', {}, tokenOf(fires[6].text)), { ended: true });
+assert.deepEqual(await api('POST', '/api/runs/end', {}, tokenOf(fires[6].text)), { ended: false });
+const epic = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Harden the Pi', status: 'Todo', assignee: rAgent.agent.id });
+await waitFor(() => fires.length === 8, 'owner run for the new issue');
+await api('POST', '/api/runs/end', {}, tokenOf(fires[7].text));
+const epicTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: epic.ref, title: 'Enable unattended upgrades', status: 'Todo', assignee: `alice-${run}@example.com` });
+await api('PATCH', `/api/items/${epicTask.ref}`, { status: 'Done' });
+await waitFor(() => fires.length === 9, 'DoD run');
+assert.match(fires[8].text, /ALL TASKS UNDER THIS ISSUE ARE DONE\. This run is the definition-of-done check/);
+await api('POST', '/api/runs/end', {}, tokenOf(fires[8].text));
+console.log('✓ explicit run end; the last task finishing starts the owner’s definition-of-done run');
+
 // Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);
 fake.close();
@@ -389,6 +402,33 @@ if (t1owner !== otherBe) {
 await assert.rejects(api('PATCH', `/api/orgs/${org}/members/${pm.agent.id}`, { role: 'admin' }), /Agents are always members/);
 const ownerId = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.role === 'owner').id;
 await assert.rejects(api('PATCH', `/api/orgs/${org}/members/${ownerId}`, { role: 'member' }), /at least one owner/);
+// Code review hand-off: Review hands tasks to a reviewer who isn't the author; sent back, they return.
+const rv = await mk('rv', ['review']);
+await api('PATCH', `/api/orgs/${org}/members/${otherBe.agent.id}`, { skills: ['backend', 'review'] }); // an author who also reviews
+await api('PATCH', `/api/projects/${org}/PIPE`, {
+  columns: pipe.columns.map((c: string) => ({ name: c, from: c, skill: c === 'Todo' ? 'product' : null, handoff: c === 'Review' ? 'review' : null })),
+});
+const t4 = await api('POST', `/api/projects/${org}/PIPE/items`, { type: 'task', parent: feature.ref, title: 'Search index', assignee: otherBe.agent.id, status: 'In progress' });
+await mcp(otherBe.key.key, 'update_item', { ref: t4.ref, status: 'Review' });
+let t4now = (await api('GET', `/api/items/${t4.ref}`)).item;
+assert.equal(t4now.assigneeName, `rv-${run}`, 'handed to a reviewer, never the author');
+await mcp(rv.key.key, 'comment', { ref: t4.ref, body: 'Add an index on (org_id, created_at).' });
+await mcp(rv.key.key, 'update_item', { ref: t4.ref, status: 'In progress' });
+assert.equal((await api('GET', `/api/items/${t4.ref}`)).item.assigneeName, otherBe.agent.name, 'changes requested: back to the author');
+await mcp(otherBe.key.key, 'update_item', { ref: t4.ref, status: 'Review' });
+await mcp(rv.key.key, 'update_item', { ref: t4.ref, status: 'Done' });
+t4now = (await api('GET', `/api/items/${t4.ref}`)).item;
+assert.equal(t4now.done, true);
+assert.equal(t4now.handedOffFrom, null);
+const rvInbox = await mcp(rv.key.key, 'get_inbox', {});
+assert.ok(rvInbox.some((n: any) => n.reason === 'review_requested' && n.itemRef === t4.ref));
+// Definition-of-done gate: an agent can't close an issue with open tasks.
+await assert.rejects(mcp(pm.key.key, 'update_item', { ref: feature.ref, status: 'Done' }), /still has open tasks/);
+for (const t of (await api('GET', `/api/items/${feature.ref}`)).tasks.filter((t: any) => !t.done)) {
+  await api('PATCH', `/api/items/${t.ref}`, { status: 'Done' });
+}
+console.log('✓ review hand-off: reviewer ≠ author, changes go back to the author; agents can’t close issues with open tasks');
+
 // Done → the human who created the issue hears about it.
 await mcp(pm.key.key, 'update_item', { ref: feature.ref, status: 'Done' });
 assert.ok((await api('GET', '/api/inbox?unread=1')).some((n: any) => n.reason === 'done' && n.itemRef === feature.ref));
@@ -483,7 +523,8 @@ const starter = `start-${run}`;
 await api('POST', '/api/orgs', { slug: starter, name: 'Starter' });
 const sOrg = await api('GET', `/api/orgs/${starter}`);
 const sAgents = Object.fromEntries(sOrg.members.filter((m: any) => m.kind === 'agent').map((m: any) => [m.name, m]));
-assert.deepEqual(Object.keys(sAgents).sort(), ['Dev', 'PM', 'QA']);
+assert.deepEqual(Object.keys(sAgents).sort(), ['Dev', 'Lead', 'PM', 'QA']);
+assert.deepEqual(sAgents.Lead.skills, ['architecture', 'review']);
 assert.deepEqual(sAgents.PM.skills, ['product']);
 assert.deepEqual(sAgents.QA.skills, ['qa']);
 assert.ok(sAgents.Dev.skills.includes('backend') && sAgents.PM.description.startsWith('You are the product manager'));
@@ -491,6 +532,7 @@ assert.equal(sOrg.agentReady, true);
 assert.equal(sAgents.PM.connected, false, 'not connected until it has a routine, webhook or used key');
 const sProj = await api('POST', `/api/orgs/${starter}/projects`, { name: 'App' });
 assert.deepEqual(sProj.columnSkills, { Todo: 'product' });
+assert.deepEqual(sProj.columnHandoffs, { Review: 'review' });
 assert.match(sProj.guidelines, /## How work flows here/);
 const sIssue = await api('POST', `/api/projects/${starter}/APP/items`, { type: 'issue', title: 'Dark mode', status: 'Todo' });
 assert.equal(sIssue.assigneeName, 'PM');
@@ -500,7 +542,7 @@ const blank = await api('POST', `/api/orgs/${starter}/projects`, { name: 'Scratc
 assert.deepEqual(blank.columnSkills, {});
 assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: 'Plain' })).guidelines, '', 'orgs without product+build+qa get blank projects');
 await api('DELETE', `/api/orgs/${starter}`, { confirm: starter });
-console.log('✓ starter setup: new org gets PM/Dev/QA; its projects route Todo to the PM and start from the pipeline guidelines');
+console.log('✓ starter setup: new org gets PM/Lead/Dev/QA; its projects route Todo to the PM and start from the pipeline guidelines');
 
 // Deleting an org: owner + typed slug; cascades, cleans up cross-org links, revokes its agents.
 const other = `other-${run}`;

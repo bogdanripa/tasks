@@ -67,7 +67,7 @@ export default function Home() {
         </form>
         <label className="check-row small" style={{ marginTop: 8 }}>
           <input type="checkbox" checked={starterAgents} onChange={(e) => setStarterAgents(e.target.checked)} />
-          Start with a team of agents: a PM, a Dev and a QA, ready to connect
+          Start with a team of agents: a PM, a Lead (design and code review), a Dev and a QA, ready to connect
         </label>
         <ErrorNote error={error} />
       </section>
