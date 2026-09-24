@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 /**
@@ -26,27 +26,38 @@ export function matchAssignee(i: { assigneeId: string | null; assigneeKind: stri
   }
 }
 
-/** A URL search param, falling back to (and remembered in) localStorage under `storeKey`. */
+/**
+ * A choice held in state, starting from the URL param (so links work) or what was last picked here
+ * (localStorage under `storeKey`). Changing it saves both; the default leaves the URL clean.
+ */
 export function useParamState<T extends string>(name: string, storeKey: string, fallback: T): [T, (v: T) => void] {
   const [params, setParams] = useSearchParams();
-  const stored = (() => {
+  const initial = () => {
+    const fromUrl = params.get(name) as T | null;
+    if (fromUrl) return fromUrl;
     try {
-      return localStorage.getItem(storeKey) as T | null;
+      return (localStorage.getItem(storeKey) as T | null) ?? fallback;
     } catch {
-      return null;
+      return fallback;
     }
-  })();
-  const value = (params.get(name) as T | null) ?? stored ?? fallback;
-  useEffect(() => {
-    try {
-      localStorage.setItem(storeKey, value);
-    } catch {}
-  }, [storeKey, value]);
+  };
+  const [value, setValue] = useState<T>(initial);
+  // Another place (a different project) uses a different key: start from its own saved choice.
+  useEffect(() => setValue(initial()), [storeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (v: T) => {
-    const next = new URLSearchParams(params);
-    if (v === fallback) next.delete(name);
-    else next.set(name, v);
-    setParams(next, { replace: true });
+    setValue(v);
+    try {
+      localStorage.setItem(storeKey, v);
+    } catch {}
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === fallback) next.delete(name);
+        else next.set(name, v);
+        return next;
+      },
+      { replace: true },
+    );
   };
   return [value, set];
 }
