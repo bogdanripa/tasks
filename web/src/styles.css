@@ -111,9 +111,22 @@ label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; font-
 }
 .logo { display: flex; align-items: center; gap: 7px; font-weight: 700; color: var(--accent); font-size: 16px; }
 .logo:hover { text-decoration: none; }
-.orgs { display: flex; gap: 2px; overflow-x: auto; }
-.orgs a { color: var(--muted); padding: 4px 10px; border-radius: 6px; white-space: nowrap; }
-.orgs a.active, .orgs a:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.pickers { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.pickers .sep { color: var(--muted); opacity: 0.6; }
+.dropdown { position: relative; min-width: 0; }
+.dropdown-toggle { border: none; background: none; padding: 5px 8px; font-weight: 600; max-width: 220px; }
+.dropdown-toggle:hover, .dropdown-toggle[aria-expanded='true'] { background: var(--surface-2); }
+.dropdown-toggle.placeholder { color: var(--muted); font-weight: 400; }
+.dropdown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caret { font-size: 10px; color: var(--muted); }
+.dropdown-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 220px; max-height: 60vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.15); padding: 6px;
+}
+.dropdown-menu a { display: block; padding: 7px 10px; border-radius: 6px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dropdown-menu a:hover { background: var(--surface-2); text-decoration: none; }
+.dropdown-menu a.on { font-weight: 600; color: var(--accent); }
+.dropdown-menu hr { border: none; border-top: 1px solid var(--border); margin: 6px 0; }
 .search { flex: 1; max-width: 420px; margin-left: auto; }
 .search input { padding: 5px 10px; background: var(--bg); }
 .inbox-link { color: var(--text); display: flex; align-items: center; gap: 6px; }

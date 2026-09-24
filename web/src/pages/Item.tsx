@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Event } from '../api';
-import { useOrgName } from '../App';
 import { Avatar, EditableMarkdown, ErrorNote, EventRow, KindBadge, Markdown, Modal, SkillChip, RefLink, Time, TypeBadge, linkVerb, useFetch } from '../ui';
 
 export default function ItemPage() {
@@ -13,7 +12,6 @@ export default function ItemPage() {
   const [editing, setEditing] = useState<'title' | null>(null);
   const [draft, setDraft] = useState('');
   const [modal, setModal] = useState<'task' | 'link' | 'trigger' | null>(null);
-  const orgName = useOrgName(org);
 
   useEffect(() => {
     const t = setInterval(() => document.visibilityState === 'visible' && !editing && reload(), 15_000);
@@ -42,8 +40,6 @@ export default function ItemPage() {
   return (
     <div className="page item-page">
       <nav className="crumbs">
-        <Link to={`/${org}`}>{orgName}</Link>
-        <span className="sep">›</span>
         <Link to={`/${org}/${project.key}`}>{project.name}</Link>
         {parent && (
           <>

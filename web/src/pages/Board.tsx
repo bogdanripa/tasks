@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Item } from '../api';
-import { useOrgName, useSession } from '../App';
+import { useSession } from '../App';
 import { Avatar, ErrorNote, SkillChip, useFetch } from '../ui';
 
 type Filter = 'all' | 'issue' | 'task';
@@ -13,7 +13,6 @@ export default function Board() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<{ status: string; index: number } | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
-  const orgName = useOrgName(org);
   const admin = useSession().me.orgs.find((o) => o.slug === org)?.role !== 'member';
 
   useEffect(() => {
@@ -65,10 +64,6 @@ export default function Board() {
     <div className="board-page">
       <div className="board-head">
         <div>
-          <nav className="crumbs">
-            <Link to={`/${org}`}>{orgName}</Link>
-            <span className="sep">›</span>
-          </nav>
           <h1>{project.name}</h1>
         </div>
         <div className="segmented" role="tablist">

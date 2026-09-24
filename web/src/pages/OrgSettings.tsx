@@ -45,10 +45,6 @@ export default function OrgSettings() {
 
   return (
     <div className="page narrow settings">
-      <nav className="crumbs">
-        <Link to={`/${org}`}>{o.name}</Link>
-        <span className="sep">›</span>
-      </nav>
       <h1>Settings</h1>
       <Tabs tabs={ORG_TABS} labels={{ general: 'General', guidelines: 'Guidelines', people: 'People', agents: 'Agents' }} current={tab} onSelect={setTab} />
 

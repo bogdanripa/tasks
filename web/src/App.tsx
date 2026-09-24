@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, get, type Me } from './api';
-import { Avatar } from './ui';
+import { Avatar, useFetch } from './ui';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import OrgPage from './pages/Org';
@@ -60,9 +60,100 @@ export default function App() {
   );
 }
 
+const RESERVED = new Set(['inbox', 'settings', 'agents', 'i']);
+const LAST_ORG = 'tasks.lastOrg';
+const LAST_PROJECT = 'tasks.lastProject'; // "org/KEY"
+const store = {
+  get: (k: string) => {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set: (k: string, v: string) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {}
+  },
+};
+
+/** The org (and project) the current page is about, if any: /:org, /:org/:key, /i/:org/:KEY-N. */
+function useCurrent(me: Me) {
+  const { pathname } = useLocation();
+  const parts = pathname.split('/').filter(Boolean);
+  let org: string | undefined;
+  let key: string | undefined;
+  if (parts[0] === 'i') [org, key] = [parts[1], parts[2]?.replace(/-\d+$/, '')];
+  else if (parts[0] && !RESERVED.has(parts[0])) [org, key] = [parts[0], parts[1] && parts[1] !== 'settings' ? parts[1] : undefined];
+  if (org && !me.orgs.some((o) => o.slug === org)) org = key = undefined;
+  return { org, key: key?.toUpperCase() };
+}
+
+/** On first load of the app's home, go back to the last project (or org) the user was in. */
+function useResumeLastPlace(me: Me, projects: any[] | null) {
+  const navigate = useNavigate();
+  const { pathname, search } = useLocation();
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (done || !projects) return;
+    setDone(true);
+    if (pathname !== '/' || search) return;
+    const lastProject = store.get(LAST_PROJECT);
+    const lastOrg = store.get(LAST_ORG);
+    if (lastProject && projects.some((p) => p.ref === lastProject)) navigate(`/${lastProject}`, { replace: true });
+    else if (lastOrg && me.orgs.some((o) => o.slug === lastOrg)) navigate(`/${lastOrg}`, { replace: true });
+  }, [projects, done]);
+}
+
+function Dropdown({ label, children, placeholder }: { label: string | null; placeholder: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+  return (
+    <div className="dropdown" ref={ref}>
+      <button className={`dropdown-toggle ${label ? '' : 'placeholder'}`} onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="dropdown-label">{label ?? placeholder}</span>
+        <span aria-hidden className="caret">▾</span>
+      </button>
+      {open && <div className="dropdown-menu" onClick={() => setOpen(false)}>{children}</div>}
+    </div>
+  );
+}
+
 function TopBar({ me }: { me: Me }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [q, setQ] = useState('');
+  const projectsFetch = useFetch<any[]>('/api/projects');
+  const projects = projectsFetch.data;
+  const current = useCurrent(me);
+  useResumeLastPlace(me, projects);
+
+  // Remember where the user is; refresh the project list as they move (new projects appear).
+  useEffect(() => {
+    if (current.org) store.set(LAST_ORG, current.org);
+    if (current.org && current.key) store.set(LAST_PROJECT, `${current.org}/${current.key}`);
+  }, [current.org, current.key]);
+  useEffect(() => {
+    projectsFetch.reload();
+  }, [pathname]);
+
+  const orgSlug = current.org ?? store.get(LAST_ORG) ?? undefined;
+  const org = me.orgs.find((o) => o.slug === orgSlug);
+  const orgProjects = (projects ?? []).filter((p) => p.orgSlug === org?.slug);
+  const project = current.key ? orgProjects.find((p) => p.key === current.key) : undefined;
+
   return (
     <header className="topbar">
       <Link to="/" className="logo">
@@ -73,13 +164,27 @@ function TopBar({ me }: { me: Me }) {
         </svg>
         Tasks
       </Link>
-      <nav className="orgs">
-        {me.orgs.map((o) => (
-          <NavLink key={o.id} to={`/${o.slug}`}>
-            {o.name}
-          </NavLink>
-        ))}
-      </nav>
+      <div className="pickers">
+        <Dropdown label={org?.name ?? null} placeholder="Organization">
+          {me.orgs.map((o) => (
+            <Link key={o.id} to={`/${o.slug}`} className={o.slug === org?.slug ? 'on' : ''}>{o.name}</Link>
+          ))}
+          <hr />
+          <Link to="/">+ New organization</Link>
+        </Dropdown>
+        {org && (
+          <>
+            <span className="sep" aria-hidden>/</span>
+            <Dropdown label={project?.name ?? null} placeholder="Projects">
+              {orgProjects.map((p) => (
+                <Link key={p.ref} to={`/${p.ref}`} className={p.key === project?.key ? 'on' : ''}>{p.name}</Link>
+              ))}
+              {orgProjects.length > 0 && <hr />}
+              <Link to={`/${org.slug}`}>All projects</Link>
+            </Dropdown>
+          </>
+        )}
+      </div>
       <form
         className="search"
         onSubmit={(e) => {
@@ -99,7 +204,7 @@ function TopBar({ me }: { me: Me }) {
         className="ghost small"
         onClick={async () => {
           await api('POST', '/auth/logout');
-          location.href = '/';
+          window.location.href = '/';
         }}
       >
         Sign out

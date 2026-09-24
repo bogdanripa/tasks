@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
-import { useOrgName, useSession } from '../App';
+import { useSession } from '../App';
 import { EditableMarkdown, ErrorNote, Tabs, useFetch, useTab } from '../ui';
 import { FormModal } from './Org';
 import { NameField } from './OrgSettings';
@@ -14,7 +14,6 @@ type Column = { name: string; from: string | null; count: number; skill: string 
 export default function ProjectSettings() {
   const { org, key } = useParams();
   const { me } = useSession();
-  const orgName = useOrgName(org);
   const navigate = useNavigate();
   const { data, error, reload } = useFetch<{ project: any; items: any[] }>(`/api/projects/${org}/${key}`);
   const [deleting, setDeleting] = useState(false);
@@ -35,8 +34,6 @@ export default function ProjectSettings() {
   return (
     <div className="page narrow settings">
       <nav className="crumbs">
-        <Link to={`/${org}`}>{orgName}</Link>
-        <span className="sep">›</span>
         <Link to={`/${org}/${key}`}>{project.name}</Link>
         <span className="sep">›</span>
       </nav>

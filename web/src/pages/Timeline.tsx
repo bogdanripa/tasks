@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { get, type Event } from '../api';
 import { ErrorNote, EventRow } from '../ui';
-import { useOrgName } from '../App';
 
 const dayLabel = (iso: string) => {
   const d = new Date(iso);
@@ -20,7 +19,6 @@ export default function Timeline() {
   const [more, setMore] = useState(true);
   const [who, setWho] = useState<'all' | 'human' | 'agent'>('all');
   const base = `/api/projects/${org}/${key}/timeline`;
-  const orgName = useOrgName(org);
 
   const load = async (before?: string) => {
     try {
@@ -46,8 +44,6 @@ export default function Timeline() {
   return (
     <div className="page narrow">
       <nav className="crumbs">
-        <Link to={`/${org}`}>{orgName}</Link>
-        <span className="sep">›</span>
         <Link to={`/${org}/${key}`}>Board</Link>
         <span className="sep">›</span>
       </nav>
