@@ -114,7 +114,9 @@ export function authRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { code?: string; state?: string } }>('/auth/google/callback', async (req, reply) => {
     const { code, state } = req.query;
     if (!code || !state || state !== req.cookies.oauth_state) throw new HttpError(400, 'Invalid OAuth state');
-    reply.clearCookie('oauth_state', { path: '/auth' });
+    // The state cookie isn't cleared here: it expires in 10 minutes anyway, and a second Set-Cookie on this
+    // response is merged into the session cookie by proxies that fold repeated headers (Pironman's static
+    // host did), which signs nobody in. One cookie per response.
     const res = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
