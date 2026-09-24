@@ -760,6 +760,9 @@ for (const c of houseConn.available) await api('PUT', `/api/agents/${house.agent
 houseConn = await api('GET', `/api/agents/${house.agent.id}/connectors`);
 assert.ok(houseConn.available.every((c: any) => c.enabled));
 assert.ok(!JSON.stringify(houseConn).includes('ops-key'), 'header values are never returned');
+const keyed = await api('POST', `/api/orgs/${org}/connectors`, { name: 'keyed', url: 'http://localhost:4563/open?key=secret123&x=1', auth: 'none' });
+assert.equal(keyed.url, 'http://localhost:4563/open?key=•••&x=•••', 'query-string keys are masked');
+await api('DELETE', `/api/connectors/${keyed.id}`);
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-mcp' } });
 const mcpItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Use the ops connector', status: 'Todo', assignee: house.agent.id });
 const mcpRun = await runFor(mcpItem.ref);

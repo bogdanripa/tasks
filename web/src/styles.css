@@ -431,7 +431,8 @@ pre.code { background: var(--surface-2); padding: 10px; border-radius: 6px; over
 .connector-tools { border-top: 1px solid var(--border); padding-top: 8px; }
 .tool-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .tool-option { flex-direction: row; align-items: flex-start; gap: 8px; font-weight: 400; }
-.tool-option input { margin-top: 3px; }
+.tool-option input { margin-top: 3px; width: auto; flex: none; }
+.tool-option > span { text-align: left; }
 .add-connector { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--surface); }
 code.inherited { margin-right: 6px; }
 .switch-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }

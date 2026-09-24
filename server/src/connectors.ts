@@ -46,10 +46,21 @@ async function requireConnector(actor: Actor, id: string) {
   return c;
 }
 
+/** Query strings often carry keys (?key=…): show their names, never their values. */
+function maskUrl(url: string) {
+  try {
+    const u = new URL(url);
+    for (const k of [...u.searchParams.keys()]) u.searchParams.set(k, '•••');
+    return u.toString().replace(/%E2%80%A2/g, '•');
+  } catch {
+    return url;
+  }
+}
+
 const view = (c: Row) => ({
   id: c.id,
   name: c.name,
-  url: c.url,
+  url: maskUrl(c.url),
   auth: c.auth,
   headerName: c.headerName,
   hasHeaderValue: !!c.headerValueEnc,
