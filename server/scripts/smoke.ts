@@ -473,6 +473,7 @@ const llmServer = http.createServer((req, res) => {
     if (b.model === 'fake-pm') {
       const steps: [string, unknown][] = [
         ['repo_list_files', {}],
+        ['repo_create_branch', { branch: 'dev', from: '' }],
         ['repo_write_files', { branch: 'dev', message: 'Spec', files: [{ path: `specs/${ref?.split('/')[1]}.md`, content: '# Pong spec' }] }],
         ['update_item', { ref, status: 'Done' }],
       ];
@@ -663,7 +664,8 @@ const specRun = await runFor(specItem.ref);
 assert.equal(specRun.error, null);
 const specSteps = (await api('GET', `/api/runs/${specRun.id}`)).steps.filter((s: any) => s.kind === 'tool_result');
 assert.match(specSteps[0].content.output, /doesn't exist yet/);
-assert.doesNotMatch(specSteps[1].content.output, /error/);
+assert.match(specSteps[1].content.output, /"created":true/, 'the PM creates the branches first');
+assert.doesNotMatch(specSteps[2].content.output, /error/);
 assert.deepEqual(Object.keys(repos.fresh).sort(), ['dev', 'main']);
 assert.ok(repos.fresh.main['README.md'] && repos.fresh.dev[`specs/${specItem.ref.split('/')[1]}.md`]);
 assert.equal((await api('GET', `/api/items/${specItem.ref}`)).item.status, 'Done');

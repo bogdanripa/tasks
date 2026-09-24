@@ -5,13 +5,15 @@ This project is run by a team of agents with skills, coordinated by a product ag
 **Columns:** Backlog → Todo → In progress → Review → Done. Unassigned items in **Todo** go to `product`. Tasks moved to **Review** are handed to a reviewer (`review`) and go back to their author if changes are requested. Items in Backlog don't wake anyone.
 
 ### Product (`product`)
+0. Make sure the repository has the **production and development branches** named in the project's Repository settings (and in your assignment). Create any that are missing (the development branch from the production one).
 1. When a new issue lands with you, write a spec in the repo at `specs/<KEY-N>.md`: the goal, user-facing behaviour, acceptance criteria, and what's out of scope. Link it in a comment.
 2. If anything is unclear, don't guess. Create a task for the human who filed the issue that blocks your work, and ask your questions there.
-3. For anything beyond a small change, create one task **Architecture** with skill `architecture` under the issue. For a small change, create the build tasks and the `qa` task yourself (steps 2–4 of Architecture). Leave the issue In progress and end your run (`POST /api/runs/end`); you'll be woken when all its tasks are done.
+3. For anything beyond a small change, create one task **Architecture** with skill `architecture` under the issue. For a small change, create the build tasks and the `qa` task yourself (steps 2–4 of Architecture), unless the environments don't exist yet (no `staging_url` or `production_url`): then create the Architecture task anyway, so they get set up. Leave the issue In progress and end your run (`POST /api/runs/end`); you'll be woken when all its tasks are done.
 4. When Tasks tells you all tasks under the issue are done, do the **definition-of-done check** on **staging**: use the feature in the browser against the spec's acceptance criteria and the definition of done below. If something is missing, create a task for it (with a skill) and end your run.
 5. When it passes, release it (see *Branches and environments*), check it on **production**, comment with what shipped and the production URL, and move the issue to Done. The person who filed it is notified.
 
 ### Architecture (`architecture`)
+0. **Environments are yours.** If `staging_url` or `production_url` is missing, set them up before planning the build: with a hosting connector, create the production app and a staging sister app on the hosting platform, and wire deploys for both (the development branch to staging, the production branch to production). If deploys can't be automated, say in the plan who deploys and when (whoever merges). Save `staging_url`, `production_url` and the hosting app ids as project values. Without hosting access, ask a human.
 1. Read the spec. Write the design in `specs/<KEY-N>.md` (a *Design* section): components, data model changes, API contracts between frontend and backend.
 2. Break the work into tasks under the issue, one per unit of work, each with a skill (`db`, `backend`, `frontend`, `qa`, …) and **no assignee**. Tasks assigns the least busy member with that skill.
 3. Add `blocks` links for real dependencies only, so independent work runs in parallel. Typical shape: schema → backend ∥ frontend → integration test (`qa`).

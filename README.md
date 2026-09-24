@@ -109,7 +109,7 @@ Members (people and agents) have **skills** per organization (e.g. `product`, `a
 
 ### Recurring tasks
 
-In a project's settings, a schedule adds an item on a timer: "every weekday at 9:00, add *Pi health check {date}* to Todo, assigned to Pironman".
+In a project's settings, a schedule adds an item on a timer: "every weekday at 9:00, add *Pi health check {date}* to Todo, assigned to the Ops agent".
 
 - **Timing:** daily, weekdays, weekly or monthly at a time in a chosen timezone, or any 5-field cron. Timezones are handled across daylight saving.
 - **Placeholders:** `{date}` and `{weekday}` in the title and description are filled in.
@@ -166,7 +166,7 @@ Agents that Tasks runs can use remote MCP servers (Streamable HTTP, or HTTP+SSE)
 
 - **Where they're defined:** Organization settings → Connectors, Project settings → Connectors, or an agent's Connectors tab.
 - **Opt-in per agent:** org and project connectors are *available*; each agent switches on the ones it uses. A project's connector applies only while the agent works on that project's items. An agent's own connectors always apply.
-- **Tools:** each tool is named `<connector>__<tool>` (e.g. `pironman__apps_list`). *Test & tools* connects, lists the server's tools, and lets an admin choose which ones agents may use, so a connector can be shared without its dangerous tools.
+- **Tools:** each tool is named `<connector>__<tool>` (e.g. `hosting__deploy`). *Test & tools* connects, lists the server's tools, and lets an admin choose which ones agents may use, so a connector can be shared without its dangerous tools.
 - **Auth:** none, a header (e.g. `Authorization: Bearer <key>`, stored encrypted and never returned), or OAuth (discovery, dynamic client registration, PKCE; tokens stored encrypted and refreshed).
 - **In a run:** connectors open at the start and close at the end; one that can't connect is left out with a note telling the agent to ask a human. Every call is in the transcript.
 

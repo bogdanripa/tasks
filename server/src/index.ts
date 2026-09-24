@@ -65,6 +65,6 @@ await migrate();
 await recoverInterruptedRuns(); // in-house runs cut short by the last restart are queued again
 startDeliveryWorker();
 startScheduler();
-// '::' is dual-stack in Node: pironman's healthcheck uses ::1, its proxy uses IPv4.
+// '::' is dual-stack in Node: a container healthcheck may use ::1 while a proxy uses IPv4.
 await app.listen({ port: config.port, host: process.env.HOST || '::' });
 console.log(`tasks listening on :${config.port}`);

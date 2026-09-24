@@ -245,6 +245,11 @@ export function repoOps(r: RunRepo) {
     await api('/git/refs', { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: await branchSha(source) } });
   };
   return {
+    /** Create a branch (from another, default the base branch) if it doesn't exist. */
+    async createBranch(branch: string, from = r.prod) {
+      await ensureBranch(branch, from);
+      return { branch, created: true };
+    },
     async listFiles(ref?: string) {
       if (!(await exists(ref ?? r.base))) return { files: [], note: `branch ${ref ?? r.base} doesn't exist yet (it's created on the first write)` };
       const tree = await api(`/git/trees/${enc(ref ?? r.base)}?recursive=1`);

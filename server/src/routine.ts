@@ -20,7 +20,7 @@ const MAX_ATTEMPTS = 6;
  * What to paste into the routine's Instructions: just "act on the payload" plus the agent's role.
  * How to work with Tasks lives in the payload, so it can change without anyone re-pasting anything.
  */
-const ROLE_PLACEHOLDER = `[Describe what this agent does and what it must never do without a human's explicit approval, e.g. "You operate the Pironman Raspberry Pi platform through the Pironman connector. Never delete apps or databases unless a human asked for it in a comment."]`;
+const ROLE_PLACEHOLDER = `[Describe what this agent does and what it must never do without a human's explicit approval, e.g. "You operate our hosting platform through its connector. Never delete apps or databases unless a human asked for it in a comment."]`;
 
 /** The Instructions to paste into an agent's routine, with its role description when it has one. */
 export function routineInstructions(description?: string) {

@@ -1,5 +1,5 @@
 -- MCP connectors for agents that Tasks runs. Defined for a whole org, a project, or one agent; a run gets
--- the org's, its item's project's and its agent's own. The name prefixes the tools (pironman__apps_list).
+-- the org's, its item's project's and its agent's own. The name prefixes the tools (hosting__deploy).
 create table connectors (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references orgs(id) on delete cascade,

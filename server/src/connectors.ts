@@ -124,7 +124,7 @@ export async function createConnector(
 ) {
   const { orgId, projectId, agentId } = await requireScope(actor, s);
   const name = input.name.trim().toLowerCase();
-  if (!NAME.test(name)) throw badRequest('Name: lowercase letters, digits and hyphens, starting with a letter (it prefixes the tools, e.g. pironman__apps_list)');
+  if (!NAME.test(name)) throw badRequest('Name: lowercase letters, digits and hyphens, starting with a letter (it prefixes the tools, e.g. hosting__deploy)');
   if (input.auth === 'header' && !input.headerValue?.trim()) throw badRequest('Give the header value (e.g. Bearer <key>)');
   const [dupe] = await sql`select 1 from connectors where org_id = ${orgId} and name = ${name}`;
   if (dupe) throw badRequest(`A connector named ${name} already exists in this organization`);

@@ -23,12 +23,17 @@ let active = 0;
 
 export const inHouseFull = () => active >= MAX_CONCURRENT;
 
-export const REPO_TOOL_NAMES = ['repo_list_files', 'repo_read_file', 'repo_write_files', 'repo_open_pull_request', 'repo_merge_pull_request', 'repo_publish_pages'];
+export const REPO_TOOL_NAMES = ['repo_create_branch', 'repo_list_files', 'repo_read_file', 'repo_write_files', 'repo_open_pull_request', 'repo_merge_pull_request', 'repo_publish_pages'];
 
 /** Git tools for the run's repository (a token limited to that one repository). */
 function repoTools(r: RunRepo, wrap: <A>(fn: (a: A) => Promise<unknown>) => (a: A) => Promise<string>): ToolSet {
   const ops = repoOps(r);
   return {
+    repo_create_branch: tool({
+      description: `Create a branch if it doesn't exist, from another (default ${r.prod}, the production branch). An empty repository gets a first commit.`,
+      inputSchema: z.object({ branch: z.string(), from: z.string().optional() }),
+      execute: wrap(({ branch, from }: any) => ops.createBranch(branch, from)),
+    }),
     repo_list_files: tool({
       description: `All file paths in ${r.repo} on a branch (default ${r.base}).`,
       inputSchema: z.object({ branch: z.string().optional() }),

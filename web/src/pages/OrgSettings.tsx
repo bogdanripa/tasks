@@ -198,7 +198,7 @@ export default function OrgSettings() {
       {modal === 'agent' && (
         <FormModal
           title="New agent"
-          fields={[{ name: 'name', label: 'Name', placeholder: 'Pironman' }]}
+          fields={[{ name: 'name', label: 'Name', placeholder: 'Ops' }]}
           note="Next, open the agent to choose how it gets work: a Claude routine, a webhook or the MCP."
           onClose={() => setModal(null)}
           onSubmit={async (v) => {

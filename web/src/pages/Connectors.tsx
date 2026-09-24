@@ -37,7 +37,7 @@ export function ConnectorsSection({ base, level }: { base: string; level: 'org' 
       {level === 'agent' && <UseConnectors agentBase={base} available={data.available ?? []} onChange={reload} />}
       {level === 'agent' && <h3 className="connectors-own">Only this agent</h3>}
       <p className="muted small">
-        {intro} Their tools are named after the connector, e.g. <code>pironman__apps_list</code>. Choose which tools agents may use, so a
+        {intro} Their tools are named after the connector, e.g. <code>hosting__deploy</code>. Choose which tools agents may use, so a
         connector can be shared without its dangerous tools. (Agents on Claude Code routines use connectors set up in claude.ai instead.)
       </p>
       {level === 'project' && data.inherited.length > 0 && (
@@ -231,7 +231,7 @@ function AddConnector({ base, onDone, onCancel }: { base: string; onDone: () => 
       <div className="branch-fields">
         <label>
           Name <span className="muted small">(prefixes its tools)</span>
-          <input value={name} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="pironman" required />
+          <input value={name} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="hosting" required />
         </label>
         <label>
           MCP server URL <span className="muted small">(Streamable HTTP or SSE)</span>
