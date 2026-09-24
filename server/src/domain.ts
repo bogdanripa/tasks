@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { sql, mutate, type Db } from './db.js';
+import { sql, mutate, bus, type Db } from './db.js';
 import type { Actor } from './auth.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { encrypt } from './crypto.js';
@@ -193,7 +193,15 @@ async function handOff(tx: Db, actor: Actor, itemId: string, from: string, to: s
   if (!cur || cur.type !== 'task') return;
   if (handoffs[to] && !handoffs[from]) {
     const reviewer = await pickBySkill(tx, cur.orgId, handoffs[to], cur.assigneeId);
-    if (!reviewer) return; // nobody else has the skill: it stays with its author, who sees no reviewer took it
+    if (!reviewer) {
+      // Nobody else has the skill: it stays with its author; tell whoever filed it so it isn't stranded.
+      const ev = await emit(tx, {
+        orgId: cur.orgId, projectId: cur.projectId, itemId, actorId: actor.id, type: 'item.no_reviewer',
+        data: { ref: cur.ref, title: cur.title, skill: handoffs[to] },
+      });
+      await notify(tx, cur.createdBy, ev, itemId, 'needs_reviewer', actor);
+      return;
+    }
     await tx`update items set assignee_id = ${reviewer.id}, handed_off_from = ${cur.assigneeId} where id = ${itemId}`;
     const ev = await emit(tx, {
       orgId: cur.orgId, projectId: cur.projectId, itemId, actorId: actor.id, type: 'item.updated',
@@ -467,6 +475,15 @@ export async function updateAgent(
       routine_url = ${routine === undefined ? sql`routine_url` : routine},
       routine_token_enc = ${tokenEnc === undefined ? sql`routine_token_enc` : tokenEnc}
     where id = ${agentId} returning id, name, webhook_url, webhook_secret, routine_url`;
+  if ((routine && !agent.routineUrl) || (webhook && !agent.webhookUrl)) {
+    // Newly connected: deliver unread updates on open items it holds (they were inbox-only until now).
+    await sql`
+      update notifications n set delivery_status = 'pending', next_attempt_at = now(), last_error = null
+      from items i
+      where n.account_id = ${agentId} and n.item_id = i.id and i.assignee_id = ${agentId} and i.closed_at is null
+        and n.read_at is null and n.delivery_status is null`;
+    bus.emit('pulse');
+  }
   return row;
 }
 
@@ -764,6 +781,12 @@ export async function removeLink(actor: Actor, linkId: string) {
     const e2 = await emit(tx, { orgId: to.orgId, projectId: to.projectId, itemId: to.id, actorId: actor.id, type: 'link.removed', data });
     await notify(tx, from.assigneeId, e1, from.id, 'unlinked', actor);
     await notify(tx, to.assigneeId, e2, to.id, 'unlinked', actor);
+    if (link.kind === 'blocks' && !to.closedAt) {
+      const [still] = await tx`
+        select 1 from links l join items b on b.id = l.from_id
+        where l.to_id = ${to.id} and l.kind = 'blocks' and l.removed_at is null and b.closed_at is null`;
+      if (!still) await notify(tx, to.assigneeId, e2, to.id, 'unblocked', actor); // last blocker gone
+    }
   });
 }
 
@@ -794,7 +817,11 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     const skill = patch.skill === undefined ? undefined : patch.skill ? normalizeSkill(patch.skill) : null;
     if (skill !== undefined && skill !== item.skill) changes.skill = [item.skill, skill];
     const moved = patch.position !== undefined && patch.position !== item.position;
-    if (Object.keys(changes).length === 0 && !moved) return;
+    if (Object.keys(changes).length === 0 && !moved) {
+      // A run "setting" the status the task already has (e.g. Done again) still means it's finished.
+      if (patch.status && actor.keyId && patch.status !== workingColumn(project.columns)) await finishRun(tx, actor.id, actor.keyId, item.id);
+      return;
+    }
 
     const status = patch.status ?? item.status;
     const done = doneColumn(project);
@@ -832,6 +859,11 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     if ((changes.status || changes.skill) && patch.assignee === undefined) await routeItem(tx, actor, item.id);
     // Review hand-off (and hand-back); an explicit assignment in the same change wins.
     if (changes.status && patch.assignee === undefined) await handOff(tx, actor, item.id, item.status, status, project.columnHandoffs ?? {}, done);
+    // A run whose task now belongs to someone else is finished (e.g. a reviewer sending it back to its author).
+    if (actor.keyId) {
+      const [now] = await tx`select assignee_id from items where id = ${item.id}`;
+      if (now.assigneeId !== actor.id) await finishRun(tx, actor.id, actor.keyId, item.id);
+    }
 
     if (changes.status && status === done) {
       // Wake whoever was waiting on this: items it blocks, items that triggered it, and its issue when all tasks are done.
@@ -864,15 +896,29 @@ export async function endRun(actor: Actor) {
   return { ended: true };
 }
 
+/**
+ * The agent is free again: make its queue due now, except updates still inside their item's quiet
+ * period (a human may still be editing that item).
+ */
+export async function requeueAgent(tx: Db, agentId: string) {
+  await tx`
+    update notifications n set next_attempt_at = greatest(now(), (
+      select max(m.created_at) from notifications m
+      where m.account_id = n.account_id and m.item_id is not distinct from n.item_id and m.delivery_status = 'pending'
+    ) + ${config.agentQuietSeconds + ' seconds'}::interval)
+    where n.account_id = ${agentId} and n.delivery_status = 'pending'`;
+}
+
 async function finishRun(tx: Db, agentId: string, keyId: string, itemId: string) {
+  // clock_timestamp, not now(): the queue compares against it to avoid a stale deferral winning a race.
   const [run] = await tx`
-    update agent_runs set finished_at = now()
+    update agent_runs set finished_at = clock_timestamp()
     where key_id = ${keyId} and item_id = ${itemId} and finished_at is null
     returning id`;
   if (!run) return;
   // Leave the run a few minutes for a closing comment, then the token dies.
   await tx`update api_keys set expires_at = least(expires_at, now() + interval '10 minutes') where id = ${keyId}`;
-  await tx`update notifications set next_attempt_at = now() where account_id = ${agentId} and delivery_status = 'pending'`;
+  await requeueAgent(tx, agentId);
 }
 
 export async function addComment(actor: Actor, ref: string, body: string) {

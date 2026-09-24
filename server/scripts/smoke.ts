@@ -344,14 +344,66 @@ for (let i = 0; i < 40 && !released?.finishedAt; i++) {
   await new Promise((r) => setTimeout(r, 100));
   released = (await api('GET', `/api/agents/${rAgent.agent.id}`)).runs.find((r: any) => r.itemRef === selfTask.ref);
 }
-assert.match(released.error, /never reached Tasks.*Network access/);
-await assert.rejects(api('GET', '/api/me', undefined, tokenOf(fires[10].text)), /401/);
+assert.match(released.error, /hadn't reached Tasks after 10 minutes.*Network access/);
+assert.equal((await api('GET', '/api/me', undefined, tokenOf(fires[10].text))).kind, 'agent', 'a late session keeps its token');
 // An admin can end a stuck run by hand.
 const stuck = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Stuck one', status: 'Todo', assignee: rAgent.agent.id });
 await waitFor(() => fires.length === 12, 'run to end by hand');
 const stuckRun = (await api('GET', `/api/agents/${rAgent.agent.id}`)).runs.find((r: any) => r.itemRef === stuck.ref);
 assert.deepEqual(await api('POST', `/api/agents/${rAgent.agent.id}/runs/${stuckRun.id}/end`, {}), { ended: true });
 console.log('✓ runs that never reach Tasks are released with a hint; admins can end a run by hand');
+
+// ---- Fixes from the pre-test review ----
+const waitFire = (n: number, what: string) => waitFor(() => fires.length === n, what);
+// Reviewer: step 1 doesn't send the task back; sending it back ends the reviewer's run right away.
+await api('PATCH', `/api/orgs/${org}/members/${rAgent.agent.id}`, { skills: ['review'] });
+const webCols = (await api('GET', `/api/projects/${org}/WEB`)).project.columns as string[];
+await api('PATCH', `/api/projects/${org}/WEB`, { columns: webCols.map((c) => ({ name: c, from: c, handoff: c === 'Review' ? 'review' : null })) });
+const byAlice = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Alice builds, agent reviews', status: 'In progress', assignee: `alice-${run}@example.com` });
+await api('PATCH', `/api/items/${byAlice.ref}`, { status: 'Review' });
+await waitFire(13, 'review run');
+assert.match(fires[12].text, /you're reviewing someone else's work\. Don't move it/);
+assert.doesNotMatch(fires[12].text, /1\. Move the task to "In progress" first/);
+assert.match(fires[12].text, /\nReviewing: a task in "Review" assigned to you/);
+await api('POST', `/api/comments/${byAlice.ref}`, { body: 'Please add tests.' }, tokenOf(fires[12].text));
+await api('PATCH', `/api/items/${byAlice.ref}`, { status: 'In progress' }, tokenOf(fires[12].text));
+assert.equal((await api('GET', `/api/items/${byAlice.ref}`)).item.assigneeName, 'Alice', 'back to its author');
+const nextOne = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Next after review', status: 'Todo', assignee: rAgent.agent.id });
+await waitFire(14, 'reviewer free right after sending it back');
+// Setting the status a task already has still ends the run.
+await api('PATCH', `/api/items/${nextOne.ref}`, { status: 'Todo' }, tokenOf(fires[13].text));
+// Queued wake-ups on an item closed meanwhile are skipped; comments still come through ("already done" wording).
+const soonDone = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Closed before it fires', status: 'Todo', assignee: rAgent.agent.id });
+await api('PATCH', `/api/items/${soonDone.ref}`, { status: 'Done' });
+await api('POST', `/api/comments/${soonDone.ref}`, { body: 'Actually, one more thing.' });
+await waitFire(15, 'comment on a done item');
+assert.match(fires[14].text, /This item is already done\. Read what changed/);
+assert.doesNotMatch(fires[14].text, /assigned it to you/, 'the stale assignment was skipped');
+await api('POST', '/api/runs/end', {}, tokenOf(fires[14].text));
+// Removing the last blocker wakes the task.
+const gate = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Gate', status: 'Todo', assignee: `alice-${run}@example.com` });
+const gated = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Gated work', status: 'Todo' });
+const gateLink = await api('POST', '/api/links', { from: gate.ref, to: gated.ref, kind: 'blocks' });
+await api('PATCH', `/api/items/${gated.ref}`, { assignee: rAgent.agent.id });
+await new Promise((r) => setTimeout(r, 1800));
+assert.equal(fires.length, 15, 'blocked: no run');
+const linkId = (await api('GET', `/api/items/${gated.ref}`)).links.find((l: any) => l.kind === 'blocks').id;
+await api('DELETE', `/api/links/${linkId}`);
+await waitFire(16, 'unlinking the last blocker wakes it');
+assert.ok(gateLink);
+// No reviewer but the author: the creator is told instead of the task being stranded in Review.
+await api('PATCH', `/api/items/${gated.ref}`, { status: 'Review' }, tokenOf(fires[15].text));
+assert.equal((await api('GET', `/api/items/${gated.ref}`)).item.assigneeName, rAgent.agent.name, 'stays with its author');
+assert.ok((await api('GET', '/api/inbox?unread=1')).some((n: any) => n.reason === 'needs_reviewer' && n.itemRef === gated.ref));
+// An agent connected after work was assigned picks it up.
+const late = await api('POST', `/api/orgs/${org}/agents`, { name: `late-${run}` });
+const lateItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Waiting for its agent', status: 'Todo', assignee: late.agent.id });
+await new Promise((r) => setTimeout(r, 1500));
+const before = fires.length;
+await api('PATCH', `/api/agents/${late.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
+await waitFor(() => fires.length === before + 1, 'connecting picks up waiting work');
+assert.match(fires[before].text, new RegExp(`Task: ${lateItem.ref}`));
+console.log('✓ review fixes: reviewer step, runs end on hand-back and same status, closed items skipped, unlink wakes, no-reviewer tells creator, connecting picks up work');
 
 // Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);

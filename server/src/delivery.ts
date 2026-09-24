@@ -19,6 +19,7 @@ async function deliverDue() {
     select n.id, n.reason, n.attempts, n.created_at, n.item_id, a.id as agent_id, a.name as agent_name, a.org_id as agent_org_id,
            a.webhook_url, a.webhook_secret, a.routine_url, a.routine_token_enc, v.assignee_id as item_assignee_id,
            lower(v.status) = 'backlog' as item_in_backlog,
+           v.closed_at is not null as item_closed,
            exists (select 1 from links l join items b on b.id = l.from_id
                    where l.to_id = n.item_id and l.kind = 'blocks' and l.removed_at is null and b.closed_at is null) as item_blocked,
            e.type as event_type, e.data as event_data, actor.name as actor_name, actor.kind as actor_kind,

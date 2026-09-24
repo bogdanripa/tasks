@@ -3,7 +3,7 @@ import { sql } from './db.js';
 import { config } from './config.js';
 import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
-import { recordEvent, workingColumn } from './domain.js';
+import { recordEvent, requeueAgent, workingColumn } from './domain.js';
 import { compactReference } from './apidoc.js';
 import { structuredPatch } from 'diff';
 
@@ -42,6 +42,7 @@ export type Pending = {
   itemAssigneeId: string | null;
   itemInBacklog: boolean;
   itemBlocked: boolean;
+  itemClosed: boolean;
 };
 
 /** A run that never calls Tasks within this long is released (usually the routine's network allowlist). */
@@ -123,7 +124,11 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
 
 function buildPayload(p: {
   working?: string;
+  /** The hand-off column, when this agent may send the task there (a task, and someone else can review). */
   reviewColumn?: string;
+  /** The hand-off column's name, whenever the project has one. */
+  reviewColumnName?: string;
+  reviewing?: boolean;
   dodCheck?: boolean;
   agentName: string;
   item: Record<string, any>;
@@ -149,18 +154,26 @@ function buildPayload(p: {
     text.trim() ? `\n${title}:\n${text.trim().slice(0, MAX_GUIDELINES)}${text.length > MAX_GUIDELINES ? '\n(truncated)' : ''}\n` : '';
   const json = `-H 'content-type: application/json'`;
   const setStatus = (st: string) => `curl -s -X PATCH ${auth} ${json} -d '{"status":"${st}"}' $TASKS/api/items/${item.ref}`;
+  // What to do first depends on where the task is: reviewing, already done, already started, or new.
+  const stepOne = () => {
+    if (p.reviewing) return `This task is in "${item.status}" and assigned to you: you're reviewing someone else's work. Don't move it to "${p.working ?? 'In progress'}" (that sends it back to its author).`;
+    if (item.done) return `This item is already done. Read what changed (usually a comment) and reply. Only reopen it (move it to "${p.working ?? project.columns[1]}") if the change asks for more work.`;
+    if (!p.working) return 'This board has no in-progress column, so start right away.';
+    if (item.status === p.working) return `It's already in "${p.working}".`;
+    return `Move the task to "${p.working}" first, so people see you're on it (this doesn't end your run):\n   ${setStatus(p.working)}`;
+  };
   return `Tasks run for agent "${p.agentName}".
 
 First, in your shell (the token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}; never put it in comments):
   export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
 
 How to work (from Tasks):
-1. ${p.working ? `Move the task to "${p.working}" first, so people see you're on it (this doesn't end your run):\n   ${setStatus(p.working)}` : 'This board has no in-progress column, so start right away.'}
+1. ${stepOne()}
 2. Read the task, including comments and links: curl -s ${auth} $TASKS/api/items/${item.ref}
 3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
 4. Comment with what you did (curl -s -X POST ${auth} ${json} -d '{"body":"..."}' $TASKS/api/comments/${item.ref}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Tasks hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: curl -s -X POST ${auth} $TASKS/api/runs/end
-5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn ? `
-Reviewing: a task in "${p.reviewColumn}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
+5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn || p.reviewing ? `
+Reviewing: a task in "${p.reviewColumnName}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
 
 ALL TASKS UNDER THIS ISSUE ARE DONE. This run is the definition-of-done check:
 - Check the result against the spec's acceptance criteria and the definition of done in the project guidelines.
@@ -219,12 +232,12 @@ async function itemWindowOpensAt(agentId: string, itemId: string): Promise<Date 
   return new Date(new Date(runs[runs.length - 1].createdAt).getTime() + 3600_000);
 }
 
-async function releaseRun(run: Record<string, any>, error: string) {
+async function releaseRun(run: Record<string, any>, error: string, revoke = true) {
   const [done] = await sql`
-    update agent_runs set finished_at = now(), error = ${error} where id = ${run.id} and finished_at is null returning id`;
+    update agent_runs set finished_at = clock_timestamp(), error = ${error} where id = ${run.id} and finished_at is null returning id`;
   if (!done) return false;
-  if (run.keyId) await sql`update api_keys set revoked_at = now() where id = ${run.keyId} and revoked_at is null`;
-  await sql`update notifications set next_attempt_at = now() where account_id = ${run.agentId} and delivery_status = 'pending'`;
+  if (revoke && run.keyId) await sql`update api_keys set revoked_at = now() where id = ${run.keyId} and revoked_at is null`;
+  await requeueAgent(sql, run.agentId);
   if (run.itemId) {
     const [item] = await sql`select org_id, project_id from item_view where id = ${run.itemId}`;
     if (item) {
@@ -246,12 +259,16 @@ export async function sweepStaleRuns() {
       (k.last_used_at is null and r.created_at < now() - ${RUN_CHECKIN_MINUTES + ' minutes'}::interval) or
       (k.last_used_at < now() - ${RUN_IDLE_MINUTES + ' minutes'}::interval))`;
   for (const run of stale) {
-    await releaseRun(
-      run,
-      run.lastUsedAt
-        ? `no activity for ${RUN_IDLE_MINUTES / 60} hours, so Tasks released the agent; the run may have crashed`
-        : `the run never reached Tasks within ${RUN_CHECKIN_MINUTES} minutes. Check that the routine's cloud environment allows ${host} (Network access → Custom), and open the session to see what happened`,
-    );
+    if (run.lastUsedAt) {
+      await releaseRun(run, `no activity for ${RUN_IDLE_MINUTES / 60} hours, so Tasks released the agent; the run may have crashed`);
+    } else {
+      // Keep its token: a session that merely started late can still do its work.
+      await releaseRun(
+        run,
+        `the run hadn't reached Tasks after ${RUN_CHECKIN_MINUTES} minutes, so Tasks stopped waiting for it. If it never does, check that the routine's cloud environment allows ${host} (Network access → Custom), and open the session to see what happened`,
+        false,
+      );
+    }
   }
 }
 
@@ -274,13 +291,17 @@ export async function processRoutineQueue(rows: Pending[]) {
   for (const [agentId, agentRows] of byAgent) {
     const stale = agentRows.filter((r) => !r.itemId || r.itemAssigneeId !== agentId);
     if (stale.length) await markRows(stale.map((r) => r.id), 'skipped', 'not assigned to this agent'); // stays in the inbox
+    // On a closed item, workflow wake-ups (assigned, unblocked, …) are history; comments and edits still
+    // come through, since someone may be asking for more.
+    const closed = agentRows.filter((r) => !stale.includes(r) && r.itemClosed && !['commented', 'updated'].includes(r.reason));
+    if (closed.length) await markRows(closed.map((r) => r.id), 'skipped', 'item is done');
     // Backlog is parked work: no runs. Moving the item out of Backlog is itself a change, so that starts one.
-    const parked = agentRows.filter((r) => !stale.includes(r) && r.itemInBacklog);
+    const parked = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && r.itemInBacklog);
     if (parked.length) await markRows(parked.map((r) => r.id), 'skipped', 'in backlog');
     // Waiting on an unfinished blocker: no runs. The last blocker finishing sends "unblocked", which starts one.
-    const blocked = agentRows.filter((r) => !stale.includes(r) && !parked.includes(r) && r.itemBlocked);
+    const blocked = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && r.itemBlocked);
     if (blocked.length) await markRows(blocked.map((r) => r.id), 'skipped', 'blocked');
-    const live = agentRows.filter((r) => !stale.includes(r) && !parked.includes(r) && !blocked.includes(r));
+    const live = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && !blocked.includes(r));
     if (!live.length) continue;
 
     const busy = await agentBusyUntil(agentId, live[0].agentOrgId);
@@ -342,10 +363,14 @@ async function fireRoutine(rows: Pending[]) {
   const team = [...(await sql`
     select a.name, a.kind, m.skills from memberships m join accounts a on a.id = m.account_id
     where m.org_id = ${item.orgId} and a.deactivated_at is null order by a.kind desc, a.name`)] as any[];
+  const reviewColumn = Object.keys(project.columnHandoffs ?? {})[0];
   const build = (changeLines: string[]) =>
     buildPayload({
       working: workingColumn(project.columns),
-      reviewColumn: Object.keys(project.columnHandoffs ?? {})[0],
+      // Offer Review only where it works: tasks, with someone other than this agent holding the skill.
+      reviewColumn: reviewColumn && item.type === 'task' && team.some((m) => m.name !== first.agentName && m.skills.includes(project.columnHandoffs[reviewColumn])) ? reviewColumn : undefined,
+      reviewColumnName: reviewColumn,
+      reviewing: !!reviewColumn && item.status === reviewColumn && item.type === 'task',
       dodCheck: item.type === 'issue' && rows.some((r) => r.reason === 'all_tasks_done'),
       orgGuidelines: project.orgGuidelines,
       team, agentName: first.agentName, item, project, parent, token: key.key, expiresAt,
