@@ -4,7 +4,7 @@ import { api } from '../api';
 import { useSession } from '../App';
 import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, SkillsEditor, Tabs, useFetch, useTab } from '../ui';
 import { AgentKeyReveal } from './Agent';
-import { FormModal } from './Org';
+import { FormModal, NotConnected } from './Org';
 
 const ORG_TABS = ['general', 'guidelines', 'people', 'agents'] as const;
 
@@ -133,7 +133,11 @@ export default function OrgSettings() {
             <li key={m.id}>
               <Avatar name={m.name} kind="agent" />
               <Link to={`/agents/${m.id}`}>{m.name}</Link>
-              <span className="muted small">{m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'polls via MCP'}</span>
+              {m.connected ? (
+                <span className="muted small">{m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'MCP'}</span>
+              ) : (
+                <NotConnected agent={m} admin />
+              )}
               {skillsFor(m)}
             </li>
           ))}

@@ -37,23 +37,6 @@ export default function OrgPage() {
         </div>
       </div>
 
-      {admin && agents.some((m: any) => !m.connected) && (
-        <section className="connect">
-          <h2>Connect your agents</h2>
-          <p className="muted small">These agents can’t receive work yet. Give each one a Claude Code routine (recommended), a webhook, or an API key for the MCP.</p>
-          <ul className="rows">
-            {agents.filter((m: any) => !m.connected).map((m: any) => (
-              <li key={m.id}>
-                <Avatar name={m.name} kind="agent" />
-                <b>{m.name}</b>
-                <span className="muted small grow">{m.skills?.join(', ')}</span>
-                <Link to={`/agents/${m.id}`} className="button small">Connect</Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       <section>
         <h2>Projects</h2>
         {data.projects.length === 0 && <p className="muted">No projects yet.</p>}
@@ -91,6 +74,7 @@ export default function OrgPage() {
                 <Avatar name={m.name} kind="agent" />
                 {admin ? <Link to={`/agents/${m.id}`}>{m.name}</Link> : <span>{m.name}</span>}
                 <KindBadge kind="agent" />
+                {!m.connected && <NotConnected agent={m} admin={admin} />}
               </li>
             ))}
           </ul>
@@ -123,6 +107,17 @@ export default function OrgPage() {
         />
       )}
     </div>
+  );
+}
+
+/** Shown next to an agent that has no routine, webhook or used API key, so it can't receive work. */
+export function NotConnected({ agent, admin }: { agent: any; admin: boolean }) {
+  return (
+    <span className="not-connected">
+      <span className="warn-icon" aria-hidden>!</span>
+      <span className="small" title="Give it a Claude Code routine, a webhook or an API key for the MCP">Not connected: can’t receive work yet</span>
+      {admin && <Link to={`/agents/${agent.id}`} className="button small">Connect</Link>}
+    </span>
   );
 }
 
