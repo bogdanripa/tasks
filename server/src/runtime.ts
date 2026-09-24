@@ -23,6 +23,11 @@ let active = 0;
 
 export const inHouseFull = () => active >= MAX_CONCURRENT;
 
+/** Near the step limit, the agent is told to report, and only has the tools that report. */
+const WRAP_UP_STEPS = 3;
+const WRAP_UP_TEXT = '[Tasks] You are almost out of steps:';
+const WRAP_UP_TOOLS = ['comment', 'update_item', 'end_run', 'create_task', 'link_items', 'set_project_value'];
+
 export const REPO_TOOL_NAMES = ['repo_create_branch', 'repo_list_files', 'repo_read_file', 'repo_write_files', 'repo_open_pull_request', 'repo_merge_pull_request', 'repo_publish_pages'];
 
 /** Git tools for the run's repository (a token limited to that one repository). */
@@ -362,7 +367,16 @@ async function execute(run: InHouseRun) {
       prompt,
       tools: { ...taskTools(actor, run.repo, browserAvailable() ? { runId: run.runId, shots } : null), ...mcp.tools },
       stopWhen: [stepCountIs(run.maxSteps), () => runFinished(run.runId)],
-      prepareStep: ({ messages }: any) => ({ messages: withScreenshots(messages, shots) }),
+      prepareStep: ({ messages, stepNumber }: any) => {
+        const left = run.maxSteps - stepNumber;
+        if (left > WRAP_UP_STEPS || run.maxSteps <= WRAP_UP_STEPS * 2) return { messages: withScreenshots(messages, shots) };
+        // Nearly out of steps: report now, with only the tools that report.
+        const base = withScreenshots(messages, shots).filter((m: any) => !(m.role === 'user' && typeof m.content === 'string' && m.content.startsWith(WRAP_UP_TEXT)));
+        return {
+          messages: [...base, { role: 'user', content: `${WRAP_UP_TEXT} ${left} step${left === 1 ? '' : 's'} left in this run. Stop investigating: comment what you did and found (and what's left), then set the task's status or end the run. Tasks wakes you again when something changes.` }],
+          activeTools: WRAP_UP_TOOLS,
+        };
+      },
       maxRetries: 2,
       abortSignal: AbortSignal.timeout(RUN_TIMEOUT_MS),
       onStepFinish: async (step: any) => {
@@ -394,6 +408,10 @@ async function execute(run: InHouseRun) {
   if (await runFinished(run.runId)) return;
   if (steps >= run.maxSteps) {
     await logStep(run.runId, 'error', { text: `Stopped after ${run.maxSteps} steps (the agent’s limit).` });
+    // Say so on the item, so the unfinished work doesn't sit silently "In progress".
+    await d
+      .addComment(actor, run.itemId, `I ran out of steps (my limit is ${run.maxSteps}) before finishing this run, so this is unfinished. Comment here to wake me and I'll continue, or raise my step limit on my Connection tab.`)
+      .catch(() => {});
     await releaseRun({ id: run.runId, agentId: run.agent.id, itemId: run.itemId, keyId: run.keyId }, `stopped at the limit of ${run.maxSteps} steps`);
     return;
   }

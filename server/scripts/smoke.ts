@@ -421,7 +421,7 @@ const llmServer = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'fake-mcp', 'fake-values', 'text-embedding-3-small'].map((id) => ({ id })) });
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'fake-mcp', 'fake-values', 'fake-wrap', 'text-embedding-3-small'].map((id) => ({ id })) });
     const b = JSON.parse(body);
     modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
     const userText = b.messages.find((m: any) => m.role === 'user')?.content;
@@ -442,6 +442,14 @@ const llmServer = http.createServer((req, res) => {
     if (b.model === 'fake-broke') return send(429, { error: { message: 'You exceeded your current quota, please check your plan and billing details.', type: 'insufficient_quota' } });
     if (b.model === 'fake-idle') return say('Nothing to do.');
     if (b.model === 'fake-loop') return call('get_item', { ref });
+    if (b.model === 'fake-wrap') {
+      // Investigates forever, until Tasks says it's nearly out of steps and only offers the reporting tools.
+      const names = (b.tools ?? []).map((t: any) => t.function.name);
+      const warned = b.messages.some((m: any) => m.role === 'user' && String(m.content).includes('almost out of steps'));
+      if (!warned || names.includes('get_item')) return call('get_item', { ref });
+      const commented = b.messages.some((m: any) => (m.tool_calls ?? []).some((c: any) => c.function.name === 'comment'));
+      return commented ? call('end_run', {}) : call('comment', { ref, body: `wrapped up with ${names.length} tools` });
+    }
     if (b.model === 'fake-dev') {
       const branch = `task/${ref?.split('/')[1]}`;
       const steps: [string, unknown][] = [
@@ -550,6 +558,13 @@ assert.equal((await runFor(idle.ref)).error, null);
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-loop', maxSteps: 3 } });
 const loopy = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Loops forever', status: 'Todo', assignee: house.agent.id });
 assert.match((await runFor(loopy.ref)).error, /limit of 3 steps/);
+assert.match((await api('GET', `/api/items/${loopy.ref}`)).comments.at(-1).body, /ran out of steps/, 'a run cut off at the limit says so on the item');
+// Near the limit, the agent is told to report and only gets the reporting tools.
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-wrap', maxSteps: 10 } });
+const wrap = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Investigate forever', status: 'Todo', assignee: house.agent.id });
+const wrapRun = await runFor(wrap.ref);
+assert.equal(wrapRun.error, null, 'it reported before the limit');
+assert.match((await api('GET', `/api/items/${wrap.ref}`)).comments.at(-1).body, /wrapped up with 6 tools/);
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-401' } });
 const refused = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Bad key', status: 'Todo', assignee: house.agent.id });
 assert.match((await runFor(refused.ref)).error, /model call failed.*Incorrect API key/);
