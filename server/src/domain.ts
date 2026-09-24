@@ -126,8 +126,8 @@ async function notify(tx: Db, accountId: string | null | undefined, eventId: num
   const [row] = await tx`
     insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
     select a.id, ${eventId}, ${itemId}, ${reason},
-           case when a.routine_url is not null or a.webhook_url is not null then 'pending' end,
-           case when a.routine_url is not null or a.webhook_url is not null then now() + ${quiet}::interval end
+           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null then 'pending' end,
+           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null then now() + ${quiet}::interval end
     from accounts a
     where a.id = ${accountId}
       and not exists (select 1 from notifications n where n.account_id = a.id and n.event_id = ${eventId} and n.item_id is not distinct from ${itemId})
@@ -296,9 +296,10 @@ export async function orgDetail(actor: Actor, slug: string) {
       where p.org_id = ${org.id} group by p.id order by p.key`,
     sql`
       select a.id, a.kind, a.name, a.email, a.avatar_url, m.role, m.skills,
-             case when a.routine_url is not null then 'routine' when a.webhook_url is not null then 'webhook' else 'poll' end as delivery,
+             case when a.runtime_provider_id is not null then 'builtin' when a.routine_url is not null then 'routine'
+                  when a.webhook_url is not null then 'webhook' else 'poll' end as delivery,
              a.description,
-             (a.routine_url is not null or a.webhook_url is not null
+             (a.runtime_provider_id is not null or a.routine_url is not null or a.webhook_url is not null
                or exists (select 1 from api_keys k where k.account_id = a.id and k.revoked_at is null and k.last_used_at is not null)) as connected,
              case when ${org.role !== 'member'} then a.webhook_url end as webhook_url
       from memberships m join accounts a on a.id = m.account_id
@@ -460,9 +461,24 @@ function checkRoutineUrl(value: string) {
 export async function updateAgent(
   actor: Actor,
   agentId: string,
-  patch: { name?: string; description?: string; webhookUrl?: string | null; routineUrl?: string | null; routineToken?: string },
+  patch: {
+    name?: string;
+    description?: string;
+    webhookUrl?: string | null;
+    routineUrl?: string | null;
+    routineToken?: string;
+    runtime?: { providerId: string; model: string; maxSteps?: number } | null;
+  },
 ) {
   const agent = await requireAgentAdmin(actor, agentId);
+  if (patch.runtime) {
+    const [p] = await sql`select id from ai_providers where id = ${patch.runtime.providerId} and org_id = ${agent.orgId}`;
+    if (!p) throw badRequest('Choose one of this organization’s AI providers');
+    if (!patch.runtime.model.trim()) throw badRequest('Choose a model');
+  }
+  // One way to get work at a time: running in Tasks replaces a routine or webhook, and the other way round.
+  if (patch.runtime) Object.assign(patch, { routineUrl: patch.routineUrl ?? null, webhookUrl: patch.webhookUrl ?? null });
+  const clearRuntime = patch.runtime === null || (patch.runtime === undefined && (!!patch.routineUrl || !!patch.webhookUrl));
   const webhook = patch.webhookUrl === undefined ? undefined : checkWebhook(patch.webhookUrl);
   const routine = patch.routineUrl === undefined ? undefined : patch.routineUrl ? checkRoutineUrl(patch.routineUrl) : null;
   if (routine && !patch.routineToken && !agent.routineTokenEnc) throw badRequest('Paste the routine’s API token too');
@@ -473,9 +489,12 @@ export async function updateAgent(
       description = coalesce(${patch.description ?? null}, description),
       webhook_url = ${webhook === undefined ? sql`webhook_url` : webhook},
       routine_url = ${routine === undefined ? sql`routine_url` : routine},
-      routine_token_enc = ${tokenEnc === undefined ? sql`routine_token_enc` : tokenEnc}
-    where id = ${agentId} returning id, name, webhook_url, webhook_secret, routine_url`;
-  if ((routine && !agent.routineUrl) || (webhook && !agent.webhookUrl)) {
+      routine_token_enc = ${tokenEnc === undefined ? sql`routine_token_enc` : tokenEnc},
+      runtime_provider_id = ${patch.runtime ? patch.runtime.providerId : clearRuntime ? null : sql`runtime_provider_id`},
+      runtime_model = ${patch.runtime ? patch.runtime.model.trim() : clearRuntime ? null : sql`runtime_model`},
+      runtime_max_steps = ${patch.runtime?.maxSteps ?? sql`runtime_max_steps`}
+    where id = ${agentId} returning id, name, webhook_url, webhook_secret, routine_url, runtime_provider_id, runtime_model`;
+  if ((routine && !agent.routineUrl) || (webhook && !agent.webhookUrl) || (patch.runtime && !agent.runtimeProviderId)) {
     // Newly connected: deliver unread updates on open items it holds (they were inbox-only until now).
     await sql`
       update notifications n set delivery_status = 'pending', next_attempt_at = now(), last_error = null

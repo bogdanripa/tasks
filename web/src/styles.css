@@ -354,6 +354,18 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .connect p { margin: 0 0 12px; }
 .button.small { padding: 3px 10px; font-size: 12px; }
 
+.transcript { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.transcript .step { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.transcript .step pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 360px; overflow: auto; margin: 8px 0 0; }
+.transcript .step.tool { border-left: 3px solid var(--agent); }
+.transcript .tool-name { color: var(--agent); font-weight: 600; }
+.transcript .step.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.transcript .step.note { color: var(--muted); font-size: 13px; }
+.transcript summary { cursor: pointer; }
+.error-text { color: var(--danger); }
+.provider-form { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; background: var(--surface); }
+.provider-form h3 { font-size: 15px; }
+
 /* modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal { background: var(--surface); border-radius: 12px; padding: 18px 20px 20px; width: min(560px, 100%); max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgb(0 0 0 / 0.3); }

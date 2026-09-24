@@ -13,6 +13,7 @@ import { mcpRoutes } from './mcp.js';
 import { startDeliveryWorker } from './delivery.js';
 import { collectRoutes } from './apidoc.js';
 import { startScheduler } from './schedules.js';
+import { recoverInterruptedRuns } from './runtime.js';
 
 const app = Fastify({ logger: { level: config.production ? 'info' : 'warn' }, trustProxy: true });
 await app.register(cookie);
@@ -52,6 +53,7 @@ if (existsSync(webDist)) {
 }
 
 await migrate();
+await recoverInterruptedRuns(); // in-house runs cut short by the last restart are queued again
 startDeliveryWorker();
 startScheduler();
 // '::' is dual-stack in Node: pironman's healthcheck uses ::1, its proxy uses IPv4.

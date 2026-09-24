@@ -2,13 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { sql } from './db.js';
 import { mintApiKey, requireActor } from './auth.js';
-import { badRequest } from './errors.js';
+import { badRequest, notFound } from './errors.js';
 import * as d from './domain.js';
 import { config } from './config.js';
 import { endRunById, routineInstructions } from './routine.js';
 import { PIPELINE_TEMPLATE } from './starter.js';
 import { fullReference, route } from './apidoc.js';
 import * as sched from './schedules.js';
+import * as llm from './llm.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
@@ -106,6 +107,28 @@ export function apiRoutes(app: FastifyInstance) {
     summary: 'remove a member or agent, or leave (your own id); their open items are unassigned',
   }, async (req) => d.removeMember(await requireActor(req), req.params.org, req.params.id));
 
+  // ---- AI providers (for agents Tasks runs itself) ----
+  route(app, 'GET', '/api/orgs/:org/ai-providers', { section: 'AI providers', summary: 'the organization’s LLM providers (keys are never returned)' }, async (req) =>
+    llm.listProviders(await requireActor(req), req.params.org),
+  );
+  route(app, 'POST', '/api/orgs/:org/ai-providers', {
+    section: 'AI providers',
+    summary: 'add an LLM provider key (admins); it’s tested against the provider, then stored encrypted',
+    body: z.object({
+      provider: z.enum(llm.PROVIDERS),
+      apiKey: z.string().min(8).max(500),
+      label: z.string().max(60).optional(),
+      baseUrl: z.string().url().optional().describe('openai-compatible only, e.g. https://openrouter.ai/api/v1'),
+    }),
+  }, async (req, { body }) => llm.addProvider(await requireActor(req), req.params.org, body));
+  route(app, 'GET', '/api/orgs/:org/ai-providers/:id/models', { section: 'AI providers', summary: 'models a provider key can use (also tests the key)' }, async (req) =>
+    llm.providerModels(await requireActor(req), req.params.org, req.params.id),
+  );
+  route(app, 'DELETE', '/api/orgs/:org/ai-providers/:id', { section: 'AI providers', summary: 'remove a provider (admins); agents using it stop until given another' }, async (req) => {
+    await llm.deleteProvider(await requireActor(req), req.params.org, req.params.id);
+    return { ok: true };
+  });
+
   // ---- agents ----
   route(app, 'POST', '/api/orgs/:org/agents', {
     section: 'Agents',
@@ -127,7 +150,7 @@ export function apiRoutes(app: FastifyInstance) {
         where n.account_id = ${agent.id} order by n.id desc limit 30`,
       sql`
         select r.id, r.status, r.reasons, r.session_url, r.error, r.created_at, r.finished_at, v.ref as item_ref, v.title as item_title,
-               k.last_used_at
+               k.last_used_at, r.runtime, r.model, r.steps, r.input_tokens, r.output_tokens
         from agent_runs r left join item_view v on v.id = r.item_id left join api_keys k on k.id = r.key_id
         where r.agent_id = ${agent.id} order by r.created_at desc limit 20`,
       sql`
@@ -149,6 +172,7 @@ export function apiRoutes(app: FastifyInstance) {
         routineUrl: agent.routineUrl,
         hasRoutineToken: !!agent.routineTokenEnc,
         description: agent.description,
+        runtime: agent.runtimeProviderId ? { providerId: agent.runtimeProviderId, model: agent.runtimeModel, maxSteps: agent.runtimeMaxSteps } : null,
         skills,
         skillSuggestions: [...new Set([...d.SUGGESTED_SKILLS, ...orgSkills.map((r) => r.s as string)])].sort(),
       },
@@ -169,6 +193,11 @@ export function apiRoutes(app: FastifyInstance) {
       webhookUrl: webhook,
       routineUrl: z.string().max(300).nullable().optional().describe('Claude Code routine /fire URL or routine id; null to remove'),
       routineToken: z.string().min(10).max(500).optional().describe('the routine’s API token; stored encrypted'),
+      runtime: z
+        .object({ providerId: z.string().uuid(), model: z.string().min(1).max(120), maxSteps: z.number().int().min(3).max(200).optional() })
+        .nullable()
+        .optional()
+        .describe('run the agent in Tasks with this provider and model; null to stop'),
     }),
   }, async (req, { body }) => d.updateAgent(await requireActor(req), req.params.id, body));
   route(app, 'DELETE', '/api/agents/:id', {
@@ -182,6 +211,15 @@ export function apiRoutes(app: FastifyInstance) {
     const actor = await requireActor(req);
     await d.requireAgentAdmin(actor, req.params.id);
     return { ended: await endRunById(req.params.run, actor.name) };
+  });
+  route(app, 'GET', '/api/runs/:id', { section: 'Agents', summary: 'an in-house run: its prompt, the model’s messages, tool calls and results' }, async (req) => {
+    const actor = await requireActor(req);
+    const [run] = await sql`
+      select r.*, a.name as agent_name, a.org_id, v.ref as item_ref, v.title as item_title
+      from agent_runs r join accounts a on a.id = r.agent_id left join item_view v on v.id = r.item_id where r.id = ${req.params.id}`;
+    if (!run || !(await d.orgRole(actor.id, run.orgId))) throw notFound('Run');
+    const steps = await sql`select id, kind, content, created_at from run_steps where run_id = ${run.id} order by id`;
+    return { run, steps };
   });
   route(app, 'POST', '/api/agents/:id/keys', {
     section: 'Agents',

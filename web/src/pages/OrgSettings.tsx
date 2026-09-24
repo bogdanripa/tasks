@@ -5,8 +5,9 @@ import { useSession } from '../App';
 import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, SkillChip, SkillsEditor, Tabs, useFetch, useTab } from '../ui';
 import { AgentKeyReveal } from './Agent';
 import { FormModal, NotConnected } from './Org';
+import { ProvidersSection } from './Providers';
 
-const ORG_TABS = ['general', 'guidelines', 'people', 'agents'] as const;
+const ORG_TABS = ['general', 'guidelines', 'people', 'agents', 'ai'] as const;
 
 export default function OrgSettings() {
   const { org } = useParams();
@@ -46,7 +47,7 @@ export default function OrgSettings() {
   return (
     <div className="page narrow settings">
       <h1>Settings</h1>
-      <Tabs tabs={ORG_TABS} labels={{ general: 'General', guidelines: 'Guidelines', people: 'People', agents: 'Agents' }} current={tab} onSelect={setTab} />
+      <Tabs tabs={ORG_TABS} labels={{ general: 'General', guidelines: 'Guidelines', people: 'People', agents: 'Agents', ai: 'AI providers' }} current={tab} onSelect={setTab} />
 
       {tab === 'general' && (
       <section>
@@ -134,7 +135,7 @@ export default function OrgSettings() {
               <Avatar name={m.name} kind="agent" />
               <Link to={`/agents/${m.id}`}>{m.name}</Link>
               {m.connected ? (
-                <span className="muted small">{m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'MCP'}</span>
+                <span className="muted small">{m.delivery === 'builtin' ? 'runs in Tasks' : m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'MCP'}</span>
               ) : (
                 <NotConnected agent={m} admin />
               )}
@@ -146,6 +147,12 @@ export default function OrgSettings() {
           ))}
         </ul>
       </section>
+      )}
+
+      {tab === 'ai' && (
+        <section>
+          <ProvidersSection org={org!} />
+        </section>
       )}
 
       {tab === 'general' && o.role === 'owner' && (

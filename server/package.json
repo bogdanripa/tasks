@@ -10,10 +10,15 @@
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.62",
+    "@ai-sdk/google": "^4.0.79",
+    "@ai-sdk/openai": "^4.0.74",
+    "@ai-sdk/xai": "^5.0.7",
     "@fastify/cookie": "^11.1.2",
     "@fastify/formbody": "^9.0.0",
     "@fastify/static": "^10.1.4",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "ai": "^7.0.113",
     "cron-parser": "^5.10.1",
     "diff": "^9.0.0",
     "fastify": "^5.12.5",

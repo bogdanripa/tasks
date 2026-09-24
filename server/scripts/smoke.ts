@@ -409,6 +409,88 @@ console.log('✓ review fixes: reviewer step, runs end on hand-back and same sta
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);
 fake.close();
 
+// ---- Agents Tasks runs itself (fake OpenAI-compatible model that scripts tool calls) ----
+const modelCalls: Record<string, number> = {};
+const llmServer = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401'].map((id) => ({ id })) });
+    const b = JSON.parse(body);
+    modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
+    const userText = b.messages.find((m: any) => m.role === 'user')?.content;
+    const text = typeof userText === 'string' ? userText : (userText ?? []).map((p: any) => p.text).join('');
+    const ref = /Task: (\S+)/.exec(text)?.[1];
+    const toolsSoFar = b.messages.filter((m: any) => m.role === 'tool').length;
+    const call = (name: string, args: unknown) => send(200, {
+      id: 'x', object: 'chat.completion', created: 0, model: b.model,
+      choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [{ id: `c${toolsSoFar}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] } }],
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    });
+    const say = (content: string) => send(200, {
+      id: 'x', object: 'chat.completion', created: 0, model: b.model,
+      choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content } }],
+      usage: { prompt_tokens: 50, completion_tokens: 5, total_tokens: 55 },
+    });
+    if (b.model === 'fake-401') return send(401, { error: { message: 'Incorrect API key provided' } });
+    if (b.model === 'fake-idle') return say('Nothing to do.');
+    if (b.model === 'fake-loop') return call('get_item', { ref });
+    // fake-worker: start, comment, finish
+    if (toolsSoFar === 0) return call('update_item', { ref, status: 'In progress' });
+    if (toolsSoFar === 1) return call('comment', { ref, body: 'Built the Pong page. Live at https://example.com/pong' });
+    if (toolsSoFar === 2) return call('update_item', { ref, status: 'Done' });
+    return say('Done.');
+  });
+});
+await new Promise<void>((r) => llmServer.listen(4557, r));
+await assert.rejects(api('POST', `/api/orgs/${org}/ai-providers`, { provider: 'openai-compatible', apiKey: 'sk-test-key', baseUrl: 'http://localhost:1/v1' }), /Couldn't reach the provider/);
+const prov = await api('POST', `/api/orgs/${org}/ai-providers`, { provider: 'openai-compatible', apiKey: 'sk-test-key', baseUrl: 'http://localhost:4557/v1', label: 'Fake' });
+assert.ok(prov.models.includes('fake-worker'));
+assert.ok(!JSON.stringify(await api('GET', `/api/orgs/${org}/ai-providers`)).includes('sk-test-key'), 'keys are never returned');
+const house = await api('POST', `/api/orgs/${org}/agents`, { name: `house-${run}` });
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-worker' } });
+const houseView = await api('GET', `/api/agents/${house.agent.id}`);
+assert.equal(houseView.agent.runtime.model, 'fake-worker');
+const pong = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Basic Pong with a URL', status: 'Todo', assignee: house.agent.id });
+let pongNow: any;
+for (let i = 0; i < 60 && !pongNow?.item.done; i++) { await new Promise((r) => setTimeout(r, 100)); pongNow = await api('GET', `/api/items/${pong.ref}`); }
+assert.equal(pongNow.item.status, 'Done', 'the in-house agent did the work');
+assert.equal(pongNow.comments.at(-1).authorName, `house-${run}`);
+const houseRun = (await api('GET', `/api/agents/${house.agent.id}`)).runs.find((r: any) => r.itemRef === pong.ref);
+assert.equal(houseRun.runtime, 'builtin');
+assert.ok(houseRun.finishedAt && !houseRun.error, 'finished cleanly');
+assert.ok(houseRun.inputTokens >= 300 && houseRun.steps >= 3, `tokens ${houseRun.inputTokens}, steps ${houseRun.steps}`);
+const transcript = await api('GET', `/api/runs/${houseRun.id}`);
+const prompt = transcript.steps.find((s: any) => s.kind === 'prompt').content.text;
+assert.match(prompt, /update_item \{"ref":"[^"]+","status":"In progress"\}/, 'tool wording, not curl');
+assert.doesNotMatch(prompt, /export TASKS=|TASKS_TOKEN/);
+assert.deepEqual(transcript.steps.filter((s: any) => s.kind === 'tool_call').map((s: any) => s.content.tool), ['update_item', 'comment', 'update_item']);
+// A model that stops without acting: the run ends quietly.
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
+const idle = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Nothing to do here', status: 'Todo', assignee: house.agent.id });
+const runFor = async (ref: string) => {
+  for (let i = 0; i < 60; i++) {
+    const r = (await api('GET', `/api/agents/${house.agent.id}`)).runs.find((x: any) => x.itemRef === ref);
+    if (r?.finishedAt) return r;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  throw new Error(`no finished run for ${ref}`);
+};
+assert.equal((await runFor(idle.ref)).error, null);
+// A model that loops stops at the step limit; a rejected key fails without retrying.
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-loop', maxSteps: 3 } });
+const loopy = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Loops forever', status: 'Todo', assignee: house.agent.id });
+assert.match((await runFor(loopy.ref)).error, /limit of 3 steps/);
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-401' } });
+const refused = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Bad key', status: 'Todo', assignee: house.agent.id });
+assert.match((await runFor(refused.ref)).error, /model call failed.*Incorrect API key/);
+// Switching to a routine turns the in-house runtime off.
+await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
+assert.equal((await api('GET', `/api/agents/${house.agent.id}`)).agent.runtime, null);
+llmServer.close();
+console.log('✓ in-house agents: provider test, tool-driven run to Done, transcript and tokens, quiet stop, step limit, rejected key, one runtime at a time');
+
 // ---- Recurring items ----
 const aliceEmail = `alice-${run}@example.com`;
 const scheduleIn = { name: 'Daily Pi check', cron: '0 9 * * *', timezone: 'Europe/Bucharest', title: 'Pi check {date}', body: 'Run on {weekday}.', status: 'Todo', assignee: aliceEmail };

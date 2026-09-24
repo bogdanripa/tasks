@@ -18,6 +18,7 @@ async function deliverDue() {
   const due = await sql`
     select n.id, n.reason, n.attempts, n.created_at, n.item_id, a.id as agent_id, a.name as agent_name, a.org_id as agent_org_id,
            a.webhook_url, a.webhook_secret, a.routine_url, a.routine_token_enc, v.assignee_id as item_assignee_id,
+           a.runtime_provider_id, a.runtime_model, a.runtime_max_steps,
            lower(v.status) = 'backlog' as item_in_backlog,
            v.closed_at is not null as item_closed,
            exists (select 1 from links l join items b on b.id = l.from_id
@@ -33,7 +34,7 @@ async function deliverDue() {
     order by n.id limit ${BATCH}`;
 
   // Routine agents go through their queue; webhook agents get one POST per notification.
-  const routine = due.filter((n) => n.routineUrl && n.routineTokenEnc);
+  const routine = due.filter((n) => (n.routineUrl && n.routineTokenEnc) || (n.runtimeProviderId && n.runtimeModel));
   if (routine.length) await processRoutineQueue(routine as unknown as Pending[]);
 
   await Promise.all(

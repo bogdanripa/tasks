@@ -13,6 +13,7 @@ import Settings from './pages/Settings';
 import AgentPage from './pages/Agent';
 import OrgSettings from './pages/OrgSettings';
 import ProjectSettings from './pages/ProjectSettings';
+import RunPage from './pages/Run';
 
 type Session = { me: Me; refreshMe: () => Promise<void> };
 const SessionContext = createContext<Session>(null!);
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/agents/:id" element={<AgentPage />} />
+          <Route path="/runs/:id" element={<RunPage />} />
           <Route path="/i/:org/:ref" element={<ItemPage />} />
           <Route path="/:org" element={<OrgPage />} />
           <Route path="/:org/settings" element={<OrgSettings />} />
@@ -60,7 +62,7 @@ export default function App() {
   );
 }
 
-const RESERVED = new Set(['inbox', 'settings', 'agents', 'i']);
+const RESERVED = new Set(['inbox', 'settings', 'agents', 'i', 'runs']);
 const LAST_ORG = 'tasks.lastOrg';
 const LAST_PROJECT = 'tasks.lastProject'; // "org/KEY"
 const store = {

@@ -33,7 +33,7 @@ export function AgentKeyReveal({ apiKey, webhookSecret }: { apiKey: string; webh
   );
 }
 
-type Mode = 'routine' | 'webhook' | 'poll';
+type Mode = 'builtin' | 'routine' | 'webhook' | 'poll';
 const AGENT_TABS = ['profile', 'connection', 'activity', 'keys'] as const;
 
 export default function AgentPage() {
@@ -54,7 +54,7 @@ export default function AgentPage() {
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
   const { agent, keys, deliveries, runs, queue, pause, routine } = data;
-  const current: Mode = agent.routineUrl ? 'routine' : agent.webhookUrl ? 'webhook' : 'poll';
+  const current: Mode = agent.runtime ? 'builtin' : agent.routineUrl ? 'routine' : agent.webhookUrl ? 'webhook' : 'poll';
   const shown = mode ?? current;
 
   return (
@@ -126,13 +126,14 @@ export default function AgentPage() {
       <section>
         <h2>How this agent gets work</h2>
         <div className="segmented" role="tablist">
-          {([['routine', 'Claude routine'], ['webhook', 'Webhook'], ['poll', 'MCP polling']] as [Mode, string][]).map(([m, label]) => (
+          {([['builtin', 'Run in Tasks'], ['routine', 'Claude routine'], ['webhook', 'Webhook'], ['poll', 'MCP polling']] as [Mode, string][]).map(([m, label]) => (
             <button key={m} className={shown === m ? 'on' : ''} onClick={() => setMode(m)}>
               {label}
               {current === m && ' ✓'}
             </button>
           ))}
         </div>
+        {shown === 'builtin' && <BuiltinSetup agent={agent} onSaved={() => { setMode(null); reload(); }} />}
         {shown === 'routine' && <RoutineSetup agent={agent} routine={routine} onSaved={() => { setMode(null); reload(); }} />}
         {shown === 'webhook' && <WebhookSetup agent={agent} onSaved={() => { setMode(null); reload(); }} />}
         {shown === 'poll' && (
@@ -142,7 +143,7 @@ export default function AgentPage() {
               <button
                 className="small"
                 onClick={async () => {
-                  await api('PATCH', `/api/agents/${id}`, { routineUrl: null, webhookUrl: null });
+                  await api('PATCH', `/api/agents/${id}`, { routineUrl: null, webhookUrl: null, runtime: null });
                   setMode(null);
                   reload();
                 }}
@@ -155,7 +156,7 @@ export default function AgentPage() {
       </section>
       )}
 
-      {tab === 'activity' && current === 'routine' && (
+      {tab === 'activity' && (current === 'routine' || current === 'builtin') && (
         <section>
           <h2>Runs</h2>
           {pause && <p className="warn">Routine runs in this organization are paused until {new Date(pause.until).toLocaleTimeString()} (Anthropic rate limit). Updates keep queuing.</p>}
@@ -170,8 +171,15 @@ export default function AgentPage() {
               <li key={r.id}>
                 <RunState run={r} />
                 {r.itemRef && <RefLink refStr={r.itemRef} />}
-                <span className="grow muted small">{r.error ?? r.reasons.map((x: string) => x.replace(/_/g, ' ')).join(', ')}</span>
-                {r.sessionUrl && <a href={r.sessionUrl} target="_blank" rel="noreferrer" className="small">session ↗</a>}
+                <span className="grow muted small">
+                  {r.error ?? r.reasons.map((x: string) => x.replace(/_/g, ' ')).join(', ')}
+                  {r.runtime === 'builtin' && ` · ${r.model} · ${r.steps} steps · ${(r.inputTokens + r.outputTokens).toLocaleString()} tokens`}
+                </span>
+                {r.runtime === 'builtin' ? (
+                  <Link to={`/runs/${r.id}`} className="small">transcript</Link>
+                ) : (
+                  r.sessionUrl && <a href={r.sessionUrl} target="_blank" rel="noreferrer" className="small">session ↗</a>
+                )}
                 {r.status === 'fired' && !r.finishedAt && (
                   <button
                     className="ghost small danger"
@@ -341,6 +349,72 @@ function RunState({ run }: { run: any }) {
   if (run.finishedAt && run.error) return <span className="delivery failed" title={run.error}>released</span>;
   if (run.finishedAt) return <span className="delivery delivered">done</span>;
   return <span className="delivery pending">running</span>;
+}
+
+function BuiltinSetup({ agent, onSaved }: { agent: any; onSaved: () => void }) {
+  const providers = useFetch<any[]>(`/api/orgs/${agent.orgSlug}/ai-providers`).data;
+  const [providerId, setProviderId] = useState<string>(agent.runtime?.providerId ?? '');
+  const [model, setModel] = useState<string>(agent.runtime?.model ?? '');
+  const [maxSteps, setMaxSteps] = useState<number>(agent.runtime?.maxSteps ?? 40);
+  const [models, setModels] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!providerId && providers?.length) setProviderId(providers[0].id);
+  }, [providers]);
+  useEffect(() => {
+    if (!providerId) return;
+    api('GET', `/api/orgs/${agent.orgSlug}/ai-providers/${providerId}/models`).then(setModels).catch(() => setModels([]));
+  }, [providerId]);
+  if (providers && providers.length === 0) {
+    return (
+      <div className="stack setup">
+        <p className="small">Tasks can run this agent itself on an LLM from OpenAI, Anthropic, Google or xAI. First add an API key for one of them.</p>
+        <Link to={`/${agent.orgSlug}/settings?tab=ai`} className="button small" style={{ alignSelf: 'flex-start' }}>Add an AI provider</Link>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="stack setup"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        try {
+          await api('PATCH', `/api/agents/${agent.id}`, { runtime: { providerId, model: model.trim(), maxSteps } });
+          setError(null);
+          onSaved();
+        } catch (err) {
+          setError((err as Error).message);
+        }
+      }}
+    >
+      <p className="small">
+        Tasks runs this agent itself: the model gets the same assignment a routine would, and Tasks’ actions as tools (read and update
+        items, comment, create and link tasks). Each run is recorded as a transcript on the Activity tab.
+      </p>
+      <div className="two-col" style={{ gap: 12 }}>
+        <label>
+          Provider
+          <select value={providerId} onChange={(e) => { setProviderId(e.target.value); setModel(''); }}>
+            {providers?.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        </label>
+        <label>
+          Model
+          <input required list="runtime-models" value={model} placeholder={models[0] ?? 'model id'} onChange={(e) => setModel(e.target.value)} />
+          <datalist id="runtime-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
+        </label>
+      </div>
+      <label>
+        Step limit per run
+        <input type="number" min={3} max={200} value={maxSteps} onChange={(e) => setMaxSteps(Number(e.target.value))} style={{ maxWidth: 120 }} />
+        <span className="hint">Each step is one model reply (with any tool calls). A run that hits the limit stops and says so.</span>
+      </label>
+      <ErrorNote error={error} />
+      <div className="actions">
+        <button className="primary">{agent.runtime ? 'Save' : 'Run in Tasks'}</button>
+      </div>
+    </form>
+  );
 }
 
 function RoutineSetup({ agent, routine, onSaved }: { agent: any; routine: any; onSaved: () => void }) {

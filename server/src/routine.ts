@@ -5,6 +5,7 @@ import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
 import { recordEvent, requeueAgent, workingColumn } from './domain.js';
 import { compactReference } from './apidoc.js';
+import { inHouseFull, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
 import { structuredPatch } from 'diff';
 
 const RUN_TOKEN_HOURS = 4;
@@ -19,9 +20,9 @@ const ROLE_PLACEHOLDER = `[Describe what this agent does and what it must never 
 
 /** The Instructions to paste into an agent's routine, with its role description when it has one. */
 export function routineInstructions(description?: string) {
-  return `You are an AI agent working in Tasks, a tracker shared by humans and AI agents. Tasks starts this routine when a task assigned to you changes.
+  return `You are an AI agent working in Tasks, a tracker shared by humans and AI agents. Tasks starts this run when a task assigned to you changes.
 
-The <routine-fire-payload> block comes from Tasks. It is your assignment for this run: the task, what changed, how to work with Tasks, and the guidelines for this project. Follow it.
+The assignment from Tasks (in a <routine-fire-payload> block, or the message below) is what to do in this run: the task, what changed, how to work with Tasks, and the guidelines for this project. Follow it.
 
 Your role and hard limits:
 ${description?.trim() || ROLE_PLACEHOLDER}`;
@@ -43,6 +44,9 @@ export type Pending = {
   itemInBacklog: boolean;
   itemBlocked: boolean;
   itemClosed: boolean;
+  runtimeProviderId: string | null;
+  runtimeModel: string | null;
+  runtimeMaxSteps: number;
 };
 
 /** A run that never calls Tasks within this long is released (usually the routine's network allowlist). */
@@ -123,6 +127,8 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
 }
 
 function buildPayload(p: {
+  /** routine: a Claude Code session using curl; builtin: Tasks runs the agent with tools. */
+  mode: 'routine' | 'builtin';
   working?: string;
   /** The hand-off column, when this agent may send the task there (a task, and someone else can review). */
   reviewColumn?: string;
@@ -153,7 +159,12 @@ function buildPayload(p: {
   const guidelines = (title: string, text: string) =>
     text.trim() ? `\n${title}:\n${text.trim().slice(0, MAX_GUIDELINES)}${text.length > MAX_GUIDELINES ? '\n(truncated)' : ''}\n` : '';
   const json = `-H 'content-type: application/json'`;
-  const setStatus = (st: string) => `curl -s -X PATCH ${auth} ${json} -d '{"status":"${st}"}' $TASKS/api/items/${item.ref}`;
+  const builtin = p.mode === 'builtin';
+  const setStatus = (st: string) =>
+    builtin ? `update_item {"ref":"${item.ref}","status":"${st}"}` : `curl -s -X PATCH ${auth} ${json} -d '{"status":"${st}"}' $TASKS/api/items/${item.ref}`;
+  const readItem = builtin ? `get_item {"ref":"${item.ref}"}` : `curl -s ${auth} $TASKS/api/items/${item.ref}`;
+  const addComment = builtin ? `comment {"ref":"${item.ref}","body":"..."}` : `curl -s -X POST ${auth} ${json} -d '{"body":"..."}' $TASKS/api/comments/${item.ref}`;
+  const endRun = builtin ? 'end_run' : `curl -s -X POST ${auth} $TASKS/api/runs/end`;
   // What to do first depends on where the task is: reviewing, already done, already started, or new.
   const stepOne = () => {
     if (p.reviewing) return `This task is in "${item.status}" and assigned to you: you're reviewing someone else's work. Don't move it to "${p.working ?? 'In progress'}" (that sends it back to its author).`;
@@ -163,15 +174,15 @@ function buildPayload(p: {
     return `Move the task to "${p.working}" first, so people see you're on it (this doesn't end your run):\n   ${setStatus(p.working)}`;
   };
   return `Tasks run for agent "${p.agentName}".
-
+${builtin ? '' : `
 First, in your shell (the token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}; never put it in comments):
   export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
-
+`}
 How to work (from Tasks):
 1. ${stepOne()}
-2. Read the task, including comments and links: curl -s ${auth} $TASKS/api/items/${item.ref}
+2. Read the task, including comments and links: ${readItem}
 3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
-4. Comment with what you did (curl -s -X POST ${auth} ${json} -d '{"body":"..."}' $TASKS/api/comments/${item.ref}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Tasks hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: curl -s -X POST ${auth} $TASKS/api/runs/end
+4. Comment with what you did (${addComment}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Tasks hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: ${endRun}
 5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn || p.reviewing ? `
 Reviewing: a task in "${p.reviewColumnName}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
 
@@ -180,7 +191,7 @@ ALL TASKS UNDER THIS ISSUE ARE DONE. This run is the definition-of-done check:
 - Anything missing or wrong: create a task for it (with a skill), comment what's missing, and end the run. You'll be woken when it's done.
 - Everything passes: deliver as the project guidelines say (pull request or merge), comment what shipped with the link, and move the issue to "${done}".` : ''}
 Do the work yourself when you can. Create tasks only to hand parts to others or to split work you'll do next (tasks you assign yourself wake you after this run). To hand work to others, create tasks under the issue with a "skill" and no assignee; Tasks gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
-If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines. Never put the API token in comments.
+If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines.${builtin ? '' : ' Never put the API token in comments.'}
 
 Team, by skill:
 ${roster}
@@ -195,9 +206,9 @@ ${p.changes.map((c) => `- ${c}`).join('\n')}
 Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
-Tasks API (with the TASKS and TASKS_TOKEN set above).
+${builtin ? `Your tools: ${TASK_TOOL_NAMES.join(', ')}. They act as ${p.agentName}.` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
-${compactReference()}`;
+${compactReference()}`}`;
 }
 
 async function markRows(ids: number[], status: 'delivered' | 'skipped' | 'failed', error: string | null, attempts?: number) {
@@ -232,7 +243,7 @@ async function itemWindowOpensAt(agentId: string, itemId: string): Promise<Date 
   return new Date(new Date(runs[runs.length - 1].createdAt).getTime() + 3600_000);
 }
 
-async function releaseRun(run: Record<string, any>, error: string, revoke = true) {
+export async function releaseRun(run: Record<string, any>, error: string, revoke = true) {
   const [done] = await sql`
     update agent_runs set finished_at = clock_timestamp(), error = ${error} where id = ${run.id} and finished_at is null returning id`;
   if (!done) return false;
@@ -255,7 +266,7 @@ export async function sweepStaleRuns() {
   const host = new URL(config.publicUrl).host;
   const stale = await sql`
     select r.id, r.agent_id, r.item_id, r.key_id, k.last_used_at from agent_runs r left join api_keys k on k.id = r.key_id
-    where r.status = 'fired' and r.finished_at is null and (
+    where r.status = 'fired' and r.finished_at is null and r.runtime = 'routine' and (
       (k.last_used_at is null and r.created_at < now() - ${RUN_CHECKIN_MINUTES + ' minutes'}::interval) or
       (k.last_used_at < now() - ${RUN_IDLE_MINUTES + ' minutes'}::interval))`;
   for (const run of stale) {
@@ -320,6 +331,11 @@ export async function processRoutineQueue(rows: Pending[]) {
       await noteThrottled(group[0], opensAt);
       continue;
     }
+    // In-house runs share a few slots on this server; wait for one.
+    if (group[0].runtimeProviderId && inHouseFull()) {
+      await defer(group.map((r) => r.id), new Date(Date.now() + RECHECK_SECONDS * 1000));
+      continue;
+    }
     // One run covers every pending update on the item, including ones not due yet (e.g. on a retry timer).
     const extra = await sql`
       select id, reason, attempts from notifications
@@ -366,6 +382,7 @@ async function fireRoutine(rows: Pending[]) {
   const reviewColumn = Object.keys(project.columnHandoffs ?? {})[0];
   const build = (changeLines: string[]) =>
     buildPayload({
+      mode: first.runtimeProviderId ? 'builtin' : 'routine',
       working: workingColumn(project.columns),
       // Offer Review only where it works: tasks, with someone other than this agent holding the skill.
       reviewColumn: reviewColumn && item.type === 'task' && team.some((m) => m.name !== first.agentName && m.skills.includes(project.columnHandoffs[reviewColumn])) ? reviewColumn : undefined,
@@ -393,6 +410,28 @@ async function fireRoutine(rows: Pending[]) {
     }
   }
   if (text.length > MAX_PAYLOAD) text = text.slice(0, MAX_PAYLOAD - 200) + '\n\n(truncated: fetch the task for the rest)';
+
+  const reasons = [...new Set(rows.map((r) => r.reason))];
+  if (first.runtimeProviderId && first.runtimeModel) {
+    // Tasks runs this agent itself.
+    const [runRow] = await sql`
+      insert into agent_runs (agent_id, item_id, key_id, reasons, status, runtime, notification_ids, model)
+      values (${first.agentId}, ${item.id}, ${key.id}, ${reasons}, 'fired', 'builtin', ${ids}, ${first.runtimeModel}) returning id`;
+    const sessionUrl = `${config.publicUrl}/app/runs/${runRow.id}`;
+    await sql`update agent_runs set session_url = ${sessionUrl} where id = ${runRow.id}`;
+    await markRows(ids, 'delivered', null, first.attempts + 1);
+    await recordEvent({
+      orgId: item.orgId, projectId: item.projectId, itemId: item.id, actorId: first.agentId, type: 'agent.run_started',
+      data: { agent: first.agentName, sessionUrl, reasons },
+    });
+    const [agentRow] = await sql`select description from accounts where id = ${first.agentId}`;
+    startInHouse({
+      runId: runRow.id, itemId: item.id, agent: { id: first.agentId, name: first.agentName, orgId: first.agentOrgId },
+      keyId: key.id, providerId: first.runtimeProviderId, model: first.runtimeModel, maxSteps: first.runtimeMaxSteps,
+      system: routineInstructions(agentRow?.description), prompt: text, notificationIds: ids, attempts: first.attempts,
+    });
+    return;
+  }
 
   let error: string | null = null;
   let retryAfter: number | null = null;
@@ -422,7 +461,6 @@ async function fireRoutine(rows: Pending[]) {
     error = fetchError(e);
   }
 
-  const reasons = [...new Set(rows.map((r) => r.reason))];
   if (!error) {
     await sql`insert into agent_runs (agent_id, item_id, key_id, reasons, status, session_url)
               values (${first.agentId}, ${item.id}, ${key.id}, ${reasons}, 'fired', ${sessionUrl})`;

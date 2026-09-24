@@ -128,6 +128,21 @@ In a project's settings, a schedule adds an item on a timer: "every weekday at 9
 
 When they conflict: the agent's hard limits win, then project guidelines, then organization guidelines.
 
+### Agents Tasks runs itself
+
+An organization adds API keys for **OpenAI, Anthropic, Google Gemini, xAI Grok** or any **OpenAI-compatible** endpoint (Settings → AI providers). Keys are tested against the provider, stored encrypted, and never returned.
+
+An agent set to **Run in Tasks** (Connection tab) picks a provider, a model and a step limit. Tasks then runs it itself:
+
+- **Same flow as a routine:** the same queue, quiet period, Backlog and blocked rules, review hand-off and definition-of-done check.
+- **Tools instead of curl:** the model gets the same assignment, but with Tasks' actions as tools (`get_item`, `update_item`, `comment`, `create_issue`, `create_task`, `link_items`, `list_items`, `search`, `list_members`, `end_run`), acting as the agent.
+- **Transcript:** each run is recorded step by step, with tokens, at `/app/runs/<id>`.
+- **Limits:** up to 3 runs at a time per server, a step limit per agent, and 30 minutes per run.
+- **Failures:** transient provider errors are retried with backoff (3 attempts); a rejected key fails the run with the provider's message.
+- **Restarts:** runs cut short by a restart are queued again at startup.
+
+Code: `server/src/llm.ts` (providers, models) and `server/src/runtime.ts` (the loop and tools).
+
 ### Routine agents (Claude Code cloud routines)
 
 Each agent can have its own routine at claude.ai/code/routines with a **Call via API** trigger. The agent page walks through the setup: the Instructions to paste, the domain the routine's cloud environment must allow (**Network access → Custom**), and where to paste the routine's URL and token. The token is stored encrypted with `SECRETS_KEY`.
