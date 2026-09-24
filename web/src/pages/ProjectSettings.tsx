@@ -6,8 +6,9 @@ import { EditableMarkdown, ErrorNote, Tabs, useFetch, useTab } from '../ui';
 import { FormModal } from './Org';
 import { NameField } from './OrgSettings';
 import { SchedulesSection } from './Schedules';
+import { RepositorySection } from './Github';
 
-const PROJECT_TABS = ['general', 'guidelines', 'board', 'recurring'] as const;
+const PROJECT_TABS = ['general', 'guidelines', 'board', 'repository', 'recurring'] as const;
 
 type Column = { name: string; from: string | null; count: number; skill: string; handoff: string };
 
@@ -38,7 +39,7 @@ export default function ProjectSettings() {
         <span className="sep">›</span>
       </nav>
       <h1>Settings</h1>
-      <Tabs tabs={PROJECT_TABS} labels={{ general: 'General', guidelines: 'Guidelines', board: 'Board columns', recurring: 'Recurring tasks' }} current={tab} onSelect={setTab} />
+      <Tabs tabs={PROJECT_TABS} labels={{ general: 'General', guidelines: 'Guidelines', board: 'Board columns', repository: 'Repository', recurring: 'Recurring tasks' }} current={tab} onSelect={setTab} />
 
       {tab === 'general' && (
       <section>
@@ -90,6 +91,12 @@ export default function ProjectSettings() {
           onSave={(columns) => update({ columns })}
         />
       </section>
+      )}
+
+      {tab === 'repository' && (
+        <section>
+          <RepositorySection org={org!} projectKey={key!} project={project} onSaved={reload} />
+        </section>
       )}
 
       {tab === 'recurring' && (

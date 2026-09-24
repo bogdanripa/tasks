@@ -10,6 +10,7 @@ import { PIPELINE_TEMPLATE } from './starter.js';
 import { fullReference, route } from './apidoc.js';
 import * as sched from './schedules.js';
 import * as llm from './llm.js';
+import * as github from './github.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
@@ -127,6 +128,48 @@ export function apiRoutes(app: FastifyInstance) {
   route(app, 'DELETE', '/api/orgs/:org/ai-providers/:id', { section: 'AI providers', summary: 'remove a provider (admins); agents using it stop until given another' }, async (req) => {
     await llm.deleteProvider(await requireActor(req), req.params.org, req.params.id);
     return { ok: true };
+  });
+
+  // ---- GitHub ----
+  route(app, 'GET', '/api/orgs/:org/github', { section: 'GitHub', summary: 'whether the org has the Tasks GitHub App installed, and which repositories it can reach' }, async (req) =>
+    github.orgGithub(await requireActor(req), req.params.org),
+  );
+  route(app, 'GET', '/api/orgs/:org/github/install', { section: 'GitHub', summary: 'start installing the Tasks GitHub App for this org (admins; redirects to GitHub)' }, async (req, _input, reply) => {
+    const { url, cookie } = await github.installStart(await requireActor(req), req.params.org);
+    reply.setCookie(cookie.name, cookie.value, { path: '/api/github', httpOnly: true, sameSite: 'lax', secure: config.production, maxAge: 900 });
+    return reply.redirect(url);
+  });
+  route(app, 'GET', '/api/github/callback', {
+    section: 'GitHub',
+    summary: 'where GitHub returns after installing the app (links the installation to the org)',
+    query: z.object({ code: z.string().optional(), installation_id: z.string().optional(), setup_action: z.string().optional() }),
+  }, async (req, { query }, reply) => {
+    const actor = await requireActor(req);
+    try {
+      const slug = await github.installCallback(actor, query, req.cookies.gh_install);
+      reply.clearCookie('gh_install', { path: '/api/github' });
+      return reply.redirect(`/app/${slug}/settings?tab=github`);
+    } catch (e) {
+      return reply.redirect(`/app/?github_error=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+  route(app, 'DELETE', '/api/orgs/:org/github', { section: 'GitHub', summary: 'unlink the org from its GitHub installation (admins; uninstall on GitHub separately)' }, async (req) => {
+    await github.disconnectGithub(await requireActor(req), req.params.org);
+    return { ok: true };
+  });
+  route(app, 'PATCH', '/api/projects/:org/:key/github', {
+    section: 'GitHub',
+    summary: 'set the project’s repository, base branch and delivery (admins)',
+    body: z.object({
+      repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'owner/name').nullable(),
+      base: z.string().max(100).optional(),
+      delivery: z.enum(['pr', 'merge']).optional().describe('pr: agents open a pull request; merge: they merge into the base branch'),
+    }),
+  }, async (req, { body }) => github.setProjectRepo(await requireActor(req), `${req.params.org}/${req.params.key}`, body));
+  route(app, 'POST', '/api/github/webhook', { section: 'GitHub', summary: 'GitHub App webhook (signed by GitHub): PRs and commits that mention KEY-N go into that item’s history' }, async (req, _input, reply) => {
+    const raw = (req as { rawBody?: string }).rawBody ?? '';
+    if (!github.verifyWebhook(raw, req.headers['x-hub-signature-256'] as string | undefined)) return reply.code(401).send({ error: 'Bad signature' });
+    return github.handleWebhook(String(req.headers['x-github-event'] ?? ''), req.body);
   });
 
   // ---- agents ----

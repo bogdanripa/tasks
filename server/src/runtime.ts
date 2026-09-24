@@ -6,6 +6,7 @@ import { HttpError } from './errors.js';
 import * as d from './domain.js';
 import { languageModel, providerFor } from './llm.js';
 import { releaseRun } from './routine.js';
+import { repoOps, type RunRepo } from './github.js';
 
 /**
  * Agents that Tasks runs itself: an LLM with Tasks' own actions as tools, driven by the same payload
@@ -19,10 +20,49 @@ let active = 0;
 
 export const inHouseFull = () => active >= MAX_CONCURRENT;
 
+export const REPO_TOOL_NAMES = ['repo_list_files', 'repo_read_file', 'repo_write_files', 'repo_open_pull_request', 'repo_merge_pull_request', 'repo_publish_pages'];
+
+/** Git tools for the run's repository (a token limited to that one repository). */
+function repoTools(r: RunRepo, wrap: <A>(fn: (a: A) => Promise<unknown>) => (a: A) => Promise<string>): ToolSet {
+  const ops = repoOps(r);
+  return {
+    repo_list_files: tool({
+      description: `All file paths in ${r.repo} on a branch (default ${r.base}).`,
+      inputSchema: z.object({ branch: z.string().optional() }),
+      execute: wrap(({ branch }: any) => ops.listFiles(branch)),
+    }),
+    repo_read_file: tool({
+      description: 'The text of one file.',
+      inputSchema: z.object({ path: z.string(), branch: z.string().optional() }),
+      execute: wrap(({ path, branch }: any) => ops.readFile(path, branch)),
+    }),
+    repo_write_files: tool({
+      description: `Create or replace files on a branch (created from ${r.base} if it doesn't exist). Give each file's full new content.`,
+      inputSchema: z.object({ branch: z.string(), message: z.string(), files: z.array(z.object({ path: z.string(), content: z.string() })).min(1) }),
+      execute: wrap(({ branch, message, files }: any) => ops.writeFiles(branch, message, files)),
+    }),
+    repo_open_pull_request: tool({
+      description: `Open a pull request from a branch into ${r.base}.`,
+      inputSchema: z.object({ branch: z.string(), title: z.string(), body: z.string() }),
+      execute: wrap(({ branch, title, body }: any) => ops.openPullRequest(branch, title, body)),
+    }),
+    repo_merge_pull_request: tool({
+      description: `Merge (squash) a pull request into ${r.base}.${r.delivery === 'pr' ? ' This project delivers by pull request: only merge if the guidelines or a human say so.' : ''}`,
+      inputSchema: z.object({ number: z.number().int() }),
+      execute: wrap(({ number }: any) => ops.mergePullRequest(number)),
+    }),
+    repo_publish_pages: tool({
+      description: `Publish ${r.base} as a website with GitHub Pages (a static site: index.html at the root, or in /docs) and get its URL. It can take a minute to go live.`,
+      inputSchema: z.object({ folder: z.enum(['/', '/docs']).optional() }),
+      execute: wrap(({ folder }: any) => ops.publishPages(folder ?? '/')),
+    }),
+  };
+}
+
 /** The tools an in-house agent works with, acting as the agent (so the usual rules apply). */
 export const TASK_TOOL_NAMES = ['get_item', 'update_item', 'comment', 'create_issue', 'create_task', 'link_items', 'list_items', 'search', 'list_members', 'end_run'];
 
-function taskTools(actor: Actor): ToolSet {
+function taskTools(actor: Actor, repo: RunRepo | null): ToolSet {
   const wrap =
     <A,>(fn: (a: A) => Promise<unknown>) =>
     async (a: A) => {
@@ -127,6 +167,7 @@ function taskTools(actor: Actor): ToolSet {
       inputSchema: z.object({}),
       execute: wrap(() => d.endRun(actor)),
     }),
+    ...(repo ? repoTools(repo, wrap) : {}),
   };
 }
 
@@ -151,6 +192,7 @@ export type InHouseRun = {
   prompt: string;
   notificationIds: number[];
   attempts: number;
+  repo: RunRepo | null;
 };
 
 /** Start an in-house run in the background. The caller has recorded the run and marked its updates delivered. */
@@ -182,7 +224,7 @@ async function execute(run: InHouseRun) {
       model: languageModel(provider, run.model),
       system: run.system,
       prompt: run.prompt,
-      tools: taskTools(actor),
+      tools: taskTools(actor, run.repo),
       stopWhen: [stepCountIs(run.maxSteps), () => runFinished(run.runId)],
       maxRetries: 2,
       abortSignal: AbortSignal.timeout(RUN_TIMEOUT_MS),

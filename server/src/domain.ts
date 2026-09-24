@@ -5,6 +5,7 @@ import { badRequest, forbidden, notFound } from './errors.js';
 import { encrypt } from './crypto.js';
 import { config } from './config.js';
 import { agentReady, PIPELINE_TEMPLATE, seedStarterAgents } from './starter.js';
+import { canUseTools } from './llm.js';
 
 export type Role = 'owner' | 'admin' | 'member';
 export type ItemType = 'issue' | 'task';
@@ -475,6 +476,7 @@ export async function updateAgent(
     const [p] = await sql`select id from ai_providers where id = ${patch.runtime.providerId} and org_id = ${agent.orgId}`;
     if (!p) throw badRequest('Choose one of this organization’s AI providers');
     if (!patch.runtime.model.trim()) throw badRequest('Choose a model');
+    if (!canUseTools(patch.runtime.model.trim())) throw badRequest(`${patch.runtime.model} can’t call tools, so it can’t work as an agent. Choose a chat model.`);
   }
   // One way to get work at a time: running in Tasks replaces a routine or webhook, and the other way round.
   if (patch.runtime) Object.assign(patch, { routineUrl: patch.routineUrl ?? null, webhookUrl: patch.webhookUrl ?? null });

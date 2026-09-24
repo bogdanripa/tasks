@@ -143,6 +143,18 @@ An agent set to **Run in Tasks** (Connection tab) picks a provider, a model and 
 
 Code: `server/src/llm.ts` (providers, models) and `server/src/runtime.ts` (the loop and tools).
 
+### GitHub
+
+An admin installs the **Tasks GitHub App** for the organization (Settings → GitHub → Connect GitHub) and chooses the repositories on GitHub. The installation is only linked after checking, through the admin's own GitHub sign-in, that their account can access it. Each project then picks a repository, a base branch and a delivery mode (Project settings → Repository):
+
+- **Per-run token:** every run gets an installation token limited to the project's repository (contents, pull requests, Pages), valid for an hour.
+- **In-house agents** get repository tools: `repo_list_files`, `repo_read_file`, `repo_write_files` (commits to a branch), `repo_open_pull_request`, `repo_merge_pull_request`, `repo_publish_pages`.
+- **Routine agents** get a clone URL with the token, and a `curl` for opening a pull request.
+- **Delivery:** `pr` means agents open a pull request for a human to merge. `merge` means agents merge into the base branch themselves.
+- **Webhooks:** pull requests and commits that mention `KEY-N` show up in that item's history.
+
+Server env: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY_B64`. The app's callback URL is `/api/github/callback` and its webhook URL is `/api/github/webhook`. Code: `server/src/github.ts`.
+
 ### Routine agents (Claude Code cloud routines)
 
 Each agent can have its own routine at claude.ai/code/routines with a **Call via API** trigger. The agent page walks through the setup: the Instructions to paste, the domain the routine's cloud environment must allow (**Network access → Custom**), and where to paste the routine's URL and token. The token is stored encrypted with `SECRETS_KEY`.

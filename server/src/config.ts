@@ -17,6 +17,18 @@ export const config = {
   routineApiBase: (process.env.ROUTINE_API_BASE ?? 'https://api.anthropic.com').replace(/\/$/, ''),
   // Agents are pinged only after an item has been quiet this long, so a human can finish editing first.
   agentQuietSeconds: Number(process.env.AGENT_QUIET_SECONDS ?? 120),
+  // GitHub App (one per deployment). The key may be given as PEM or base64 of the PEM.
+  github: {
+    appId: process.env.GITHUB_APP_ID ?? '',
+    appSlug: process.env.GITHUB_APP_SLUG ?? '',
+    clientId: process.env.GITHUB_CLIENT_ID ?? '',
+    clientSecret: process.env.GITHUB_CLIENT_SECRET ?? '',
+    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? '',
+    privateKey: process.env.GITHUB_PRIVATE_KEY ?? (process.env.GITHUB_PRIVATE_KEY_B64 ? Buffer.from(process.env.GITHUB_PRIVATE_KEY_B64, 'base64').toString('utf8') : ''),
+    // Overridable so tests can use a fake GitHub.
+    apiBase: (process.env.GITHUB_API_BASE ?? 'https://api.github.com').replace(/\/$/, ''),
+    webBase: (process.env.GITHUB_WEB_BASE ?? 'https://github.com').replace(/\/$/, ''),
+  },
   secretsKey: process.env.SECRETS_KEY ?? (process.env.NODE_ENV === 'production' ? '' : 'dev-only-insecure-secrets-key'),
 };
 if (!config.secretsKey) throw new Error('SECRETS_KEY is required in production');

@@ -416,7 +416,7 @@ const llmServer = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401'].map((id) => ({ id })) });
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'text-embedding-3-small'].map((id) => ({ id })) });
     const b = JSON.parse(body);
     modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
     const userText = b.messages.find((m: any) => m.role === 'user')?.content;
@@ -436,6 +436,20 @@ const llmServer = http.createServer((req, res) => {
     if (b.model === 'fake-401') return send(401, { error: { message: 'Incorrect API key provided' } });
     if (b.model === 'fake-idle') return say('Nothing to do.');
     if (b.model === 'fake-loop') return call('get_item', { ref });
+    if (b.model === 'fake-dev') {
+      const branch = `task/${ref?.split('/')[1]}`;
+      const steps: [string, unknown][] = [
+        ['update_item', { ref, status: 'In progress' }],
+        ['repo_write_files', { branch, message: 'Pong: first playable version', files: [{ path: 'index.html', content: '<canvas id=pong></canvas><script>/* pong */</script>' }] }],
+        ['repo_open_pull_request', { branch, title: `${ref?.split('/')[1]}: basic Pong`, body: 'Two paddles, a ball, score to 11.' }],
+        ['repo_merge_pull_request', { number: 1 }],
+        ['repo_publish_pages', {}],
+        ['comment', { ref, body: 'Merged and live at https://octo.github.io/pong/' }],
+        ['update_item', { ref, status: 'Done' }],
+      ];
+      if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
+      return say('Shipped.');
+    }
     // fake-worker: start, comment, finish
     if (toolsSoFar === 0) return call('update_item', { ref, status: 'In progress' });
     if (toolsSoFar === 1) return call('comment', { ref, body: 'Built the Pong page. Live at https://example.com/pong' });
@@ -447,6 +461,8 @@ await new Promise<void>((r) => llmServer.listen(4557, r));
 await assert.rejects(api('POST', `/api/orgs/${org}/ai-providers`, { provider: 'openai-compatible', apiKey: 'sk-test-key', baseUrl: 'http://localhost:1/v1' }), /Couldn't reach the provider/);
 const prov = await api('POST', `/api/orgs/${org}/ai-providers`, { provider: 'openai-compatible', apiKey: 'sk-test-key', baseUrl: 'http://localhost:4557/v1', label: 'Fake' });
 assert.ok(prov.models.includes('fake-worker'));
+assert.ok(!prov.models.includes('text-embedding-3-small'), 'models that can’t call tools are hidden');
+await assert.rejects(api('PATCH', `/api/agents/${(await api('POST', `/api/orgs/${org}/agents`, { name: `emb-${run}` })).agent.id}`, { runtime: { providerId: prov.id, model: 'text-embedding-3-small' } }), /can’t call tools/);
 assert.ok(!JSON.stringify(await api('GET', `/api/orgs/${org}/ai-providers`)).includes('sk-test-key'), 'keys are never returned');
 const house = await api('POST', `/api/orgs/${org}/agents`, { name: `house-${run}` });
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-worker' } });
@@ -485,6 +501,94 @@ assert.match((await runFor(loopy.ref)).error, /limit of 3 steps/);
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-401' } });
 const refused = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Bad key', status: 'Todo', assignee: house.agent.id });
 assert.match((await runFor(refused.ref)).error, /model call failed.*Incorrect API key/);
+// ---- GitHub: install (verified), project repository, per-run repo access, webhooks ----
+const repoFiles: Record<string, Record<string, string>> = { main: { 'README.md': '# pong' } };
+const ghCalls: string[] = [];
+let tokenRequests: any[] = [];
+const ghServer = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    const url = new URL(req.url!, 'http://x');
+    const p = url.pathname;
+    const b = body ? JSON.parse(body) : {};
+    ghCalls.push(`${req.method} ${p}`);
+    if (req.method === 'POST' && /^\/app\/installations\/777\/access_tokens$/.test(p)) { tokenRequests.push(b); return send(201, { token: `ghs_run${tokenRequests.length}`, expires_at: new Date(Date.now() + 3600_000).toISOString() }); }
+    if (p === '/installation/repositories') return send(200, { repositories: [{ full_name: 'octo/pong' }] });
+    if (p === '/login/oauth/access_token') return send(200, b.code === 'good' ? { access_token: 'gho_user' } : { error: 'bad_verification_code' });
+    if (p === '/user/installations') return send(200, { installations: [{ id: 777, account: { login: 'octo', type: 'User' } }] });
+    const m = /^\/repos\/octo\/pong(\/.*)$/.exec(p);
+    if (!m) return send(404, { message: 'Not Found' });
+    const rest = m[1];
+    let r: RegExpExecArray | null;
+    if ((r = /^\/git\/ref\/heads\/(.+)$/.exec(rest))) return repoFiles[decodeURIComponent(r[1])] ? send(200, { object: { sha: `sha-${r[1]}` } }) : send(404, { message: 'Not Found' });
+    if (rest === '/git/refs' && req.method === 'POST') { repoFiles[b.ref.replace('refs/heads/', '')] = { ...repoFiles.main }; return send(201, {}); }
+    if ((r = /^\/git\/trees\/(.+)$/.exec(rest))) return send(200, { tree: Object.keys(repoFiles[decodeURIComponent(r[1])] ?? {}).map((path) => ({ type: 'blob', path })) });
+    if ((r = /^\/contents\/(.+)$/.exec(rest))) {
+      const path = decodeURIComponent(r[1]);
+      if (req.method === 'GET') {
+        const f = repoFiles[url.searchParams.get('ref') ?? 'main']?.[path];
+        return f === undefined ? send(404, { message: 'Not Found' }) : send(200, { content: Buffer.from(f).toString('base64'), sha: 'filesha' });
+      }
+      repoFiles[b.branch][path] = Buffer.from(b.content, 'base64').toString('utf8');
+      return send(200, { commit: { sha: 'c1' } });
+    }
+    if (rest === '/pulls' && req.method === 'POST') { (repoFiles as any).__pr = b.head; return send(201, { number: 1, html_url: 'https://github.com/octo/pong/pull/1' }); }
+    if (rest === '/pulls/1/merge') { Object.assign(repoFiles.main, repoFiles[(repoFiles as any).__pr]); return send(200, { merged: true }); }
+    if (rest === '/pages' && req.method === 'POST') return send(201, {});
+    if (rest === '/pages') return send(200, { html_url: 'https://octo.github.io/pong/', status: 'built' });
+    return send(404, { message: 'Not Found' });
+  });
+});
+await new Promise<void>((r) => ghServer.listen(4559, r));
+assert.deepEqual(await api('GET', `/api/orgs/${org}/github`), { configured: true, connected: false });
+const installStart = await fetch(`${BASE}/api/orgs/${org}/github/install`, { headers: { cookie }, redirect: 'manual' });
+assert.equal(installStart.status, 302);
+assert.match(installStart.headers.get('location')!, /\/apps\/tasks-test\/installations\/new$/);
+const installCookie = /gh_install=[^;]+/.exec(installStart.headers.get('set-cookie')!)![0];
+const callback = (qs: string, c = `${cookie}; ${installCookie}`) => fetch(`${BASE}/api/github/callback?${qs}`, { headers: { cookie: c }, redirect: 'manual' }).then((r) => r.headers.get('location')!);
+assert.match(await callback('code=good&installation_id=999&setup_action=install'), /github_error=.*isn%E2%80%99t%20one%20your%20GitHub%20account/, 'someone else’s installation id is refused');
+assert.match(await callback('code=good&installation_id=777', cookie), /github_error=.*expired%20or%20was%20started/, 'no install cookie, no link');
+assert.equal(await callback('code=good&installation_id=777&setup_action=install'), `/app/${org}/settings?tab=github`);
+const ghState = await api('GET', `/api/orgs/${org}/github`);
+assert.equal(ghState.account, 'octo');
+assert.deepEqual(ghState.repos, ['octo/pong']);
+await assert.rejects(api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/secret' }), /can’t access octo\/secret/);
+await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', delivery: 'merge' });
+// In-house developer: builds on a branch, opens a PR, merges it, publishes Pages, comments the URL.
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-dev', maxSteps: 20 } });
+tokenRequests = [];
+const pongGh = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Pong on GitHub Pages', status: 'Todo', assignee: house.agent.id });
+const devRun = await runFor(pongGh.ref);
+assert.equal(devRun.error, null);
+const pongGhNow = await api('GET', `/api/items/${pongGh.ref}`);
+assert.equal(pongGhNow.item.status, 'Done');
+assert.match(pongGhNow.comments.at(-1).body, /octo\.github\.io\/pong/);
+assert.match(repoFiles.main['index.html'], /pong/, 'merged into main');
+assert.deepEqual(tokenRequests[0]?.repositories, ['pong'], 'run token limited to the project repo');
+const devPrompt = (await api('GET', `/api/runs/${devRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text;
+assert.match(devPrompt, /Repository: https:\/\/github\.com\/octo\/pong \(base branch main\)\. Deliver by merging/);
+assert.match(devPrompt, /repo_write_files/);
+// Webhooks: PRs and commits that mention an item land in its history; bad signatures are refused.
+const ghHook = async (event: string, payload: unknown, secret = 'test-webhook-secret') => {
+  const raw = JSON.stringify(payload);
+  const sig = 'sha256=' + createHmac('sha256', secret).update(raw).digest('hex');
+  return fetch(`${BASE}/api/github/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': event, 'x-hub-signature-256': sig }, body: raw });
+};
+const itemNo = pongGh.ref.split('-').pop();
+assert.equal((await ghHook('pull_request', {}, 'wrong')).status, 401);
+const prHook = await (await ghHook('pull_request', {
+  action: 'closed', installation: { id: 777 }, repository: { full_name: 'octo/pong' },
+  pull_request: { number: 1, merged: true, title: `WEB-${itemNo}: basic Pong`, html_url: 'https://github.com/octo/pong/pull/1', user: { login: 'octo' }, head: { ref: 'x' } },
+})).json();
+assert.ok(prHook.recorded >= 1);
+await ghHook('push', { ref: 'refs/heads/main', installation: { id: 777 }, repository: { full_name: 'octo/pong' }, commits: [{ id: 'abcdef1234', message: `Fix paddle speed (WEB-${itemNo})`, url: 'u', author: { username: 'octo' } }] });
+const ghHistory = (await api('GET', `/api/items/${pongGh.ref}`)).history.map((e: any) => e.type);
+assert.ok(ghHistory.includes('github.pull_request') && ghHistory.includes('github.commit'));
+ghServer.close();
+console.log('✓ GitHub: verified install, project repo, repo-scoped run token, in-house agent ships via PR + Pages, webhooks in history');
+
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
 assert.equal((await api('GET', `/api/agents/${house.agent.id}`)).agent.runtime, null);

@@ -17,6 +17,15 @@ import { recoverInterruptedRuns } from './runtime.js';
 
 const app = Fastify({ logger: { level: config.production ? 'info' : 'warn' }, trustProxy: true });
 await app.register(cookie);
+// Keep the raw JSON text too: GitHub webhook signatures are computed over it.
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+  (req as { rawBody?: string }).rawBody = body as string;
+  try {
+    done(null, body ? JSON.parse(body as string) : {});
+  } catch {
+    done(new HttpError(400, 'Invalid JSON body'), undefined);
+  }
+});
 collectRoutes(app); // before any route, so /api/help sees them all
 
 app.setErrorHandler((err, req, reply) => {

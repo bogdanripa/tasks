@@ -132,6 +132,26 @@ export function describe(e: Event, showItem: boolean): ReactNode {
       return <>hit its limit of {d.limit} runs an hour{showItem ? <> on {item}</> : ' on this item'}; updates are queued until {new Date(d.resumesAt).toLocaleTimeString()}</>;
     case 'project.created':
       return <>created the project</>;
+    case 'project.updated':
+      return d.changes && 'repository' in d.changes
+        ? (d.changes.repository ? <>linked the project to <b>{d.changes.repository}</b> on GitHub</> : <>unlinked the project’s GitHub repository</>)
+        : <>updated the project settings</>;
+    case 'github.connected':
+      return <>connected GitHub (<b>{d.account}</b>)</>;
+    case 'github.pull_request':
+      return (
+        <>
+          (via GitHub) pull request <a href={d.url} target="_blank" rel="noreferrer">#{d.number} {d.title}</a> {d.action}
+          {d.author && <> by {d.author}</>}{showItem && <> · {item}</>}
+        </>
+      );
+    case 'github.commit':
+      return (
+        <>
+          (via GitHub) commit <a href={d.url} target="_blank" rel="noreferrer"><code>{d.sha}</code></a> on {d.branch}: <span className="excerpt">{d.message}</span>
+          {showItem && <> · {item}</>}
+        </>
+      );
     default:
       return <>{e.type}</>;
   }

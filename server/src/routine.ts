@@ -5,7 +5,8 @@ import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
 import { recordEvent, requeueAgent, workingColumn } from './domain.js';
 import { compactReference } from './apidoc.js';
-import { inHouseFull, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
+import { inHouseFull, REPO_TOOL_NAMES, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
+import { runRepo, type RunRepo } from './github.js';
 import { structuredPatch } from 'diff';
 
 const RUN_TOKEN_HOURS = 4;
@@ -126,9 +127,34 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
   }
 }
 
+/** The project's repository, and how to work with it in this runtime. */
+function repoSection(p: { mode: 'routine' | 'builtin'; repo?: RunRepo | { error: string } | null }, item: Record<string, any>) {
+  if (!p.repo) return '';
+  if (!('token' in p.repo)) return `\nRepository: unavailable for this run (${p.repo.error}). Say so in a comment if you need it.\n`;
+  const r = p.repo;
+  const branch = `task/${item.ref.split('/')[1]}`;
+  const deliver =
+    r.delivery === 'pr'
+      ? `Deliver by pull request: commit on a branch (e.g. ${branch}), open a PR into ${r.base}, and link it in your comment. Don't commit to ${r.base}.`
+      : `Deliver by merging into ${r.base}: commit on a branch (e.g. ${branch}), then open a PR and merge it (or commit to ${r.base} directly for small changes).`;
+  if (p.mode === 'builtin') {
+    return `
+Repository: https://github.com/${r.repo} (base branch ${r.base}). ${deliver}
+Use the repo_* tools: list and read files, write files to a branch (one commit per file), open and merge pull requests, and publish ${r.base} with GitHub Pages for a live URL.
+`;
+  }
+  return `
+Repository: https://github.com/${r.repo} (base branch ${r.base}). ${deliver}
+A token limited to this repository (valid until ${r.expiresAt.toISOString()}; never put it in comments):
+  git clone https://x-access-token:${r.token}@github.com/${r.repo}.git
+  Open a PR: curl -s -X POST -H "Authorization: Bearer ${r.token}" https://api.github.com/repos/${r.repo}/pulls -d '{"head":"${branch}","base":"${r.base}","title":"...","body":"..."}'
+`;
+}
+
 function buildPayload(p: {
   /** routine: a Claude Code session using curl; builtin: Tasks runs the agent with tools. */
   mode: 'routine' | 'builtin';
+  repo?: RunRepo | { error: string } | null;
   working?: string;
   /** The hand-off column, when this agent may send the task there (a task, and someone else can review). */
   reviewColumn?: string;
@@ -206,7 +232,8 @@ ${p.changes.map((c) => `- ${c}`).join('\n')}
 Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
-${builtin ? `Your tools: ${TASK_TOOL_NAMES.join(', ')}. They act as ${p.agentName}.` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
+${repoSection(p, item)}
+${builtin ? `Your tools: ${[...TASK_TOOL_NAMES, ...(p.repo && 'token' in p.repo ? REPO_TOOL_NAMES : [])].join(', ')}. They act as ${p.agentName}.` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
 ${compactReference()}`}`;
 }
@@ -379,10 +406,13 @@ async function fireRoutine(rows: Pending[]) {
   const team = [...(await sql`
     select a.name, a.kind, m.skills from memberships m join accounts a on a.id = m.account_id
     where m.org_id = ${item.orgId} and a.deactivated_at is null order by a.kind desc, a.name`)] as any[];
+  // A token limited to the project's repository, for this run (none when the project has no repository).
+  const repo = await runRepo(item.projectId).catch((e) => ({ error: (e as Error).message }));
   const reviewColumn = Object.keys(project.columnHandoffs ?? {})[0];
   const build = (changeLines: string[]) =>
     buildPayload({
       mode: first.runtimeProviderId ? 'builtin' : 'routine',
+      repo,
       working: workingColumn(project.columns),
       // Offer Review only where it works: tasks, with someone other than this agent holding the skill.
       reviewColumn: reviewColumn && item.type === 'task' && team.some((m) => m.name !== first.agentName && m.skills.includes(project.columnHandoffs[reviewColumn])) ? reviewColumn : undefined,
@@ -429,6 +459,7 @@ async function fireRoutine(rows: Pending[]) {
       runId: runRow.id, itemId: item.id, agent: { id: first.agentId, name: first.agentName, orgId: first.agentOrgId },
       keyId: key.id, providerId: first.runtimeProviderId, model: first.runtimeModel, maxSteps: first.runtimeMaxSteps,
       system: routineInstructions(agentRow?.description), prompt: text, notificationIds: ids, attempts: first.attempts,
+      repo: repo && 'token' in repo ? repo : null,
     });
     return;
   }

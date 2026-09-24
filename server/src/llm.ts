@@ -38,7 +38,20 @@ export function languageModel(p: ProviderRow, model: string): LanguageModel {
   }
 }
 
-/** Models the key can use, straight from the provider. Doubles as the key test. */
+/**
+ * Models that can't drive an agent (no tool calling): embeddings, speech, images, video, moderation,
+ * legacy completion models, and open-weight Gemma on the Gemini API. A blacklist rather than an allowlist,
+ * so new chat models show up without a code change.
+ */
+const NO_TOOLS = [
+  /embed/i, /tts/i, /whisper/i, /transcrib/i, /audio/i, /realtime/i, /speech/i,
+  /dall-e/i, /image/i, /imagen/i, /veo/i, /sora/i, /vision-preview/i,
+  /moderation/i, /babbage/i, /davinci/i, /-instruct\b/i, /^o1-(mini|preview)/i,
+  /search-preview/i, /computer-use/i, /\baqa\b/i, /^gemma/i, /learnlm/i, /^chatgpt-/i,
+];
+export const canUseTools = (model: string) => !NO_TOOLS.some((re) => re.test(model));
+
+/** Models the key can use that can call tools, straight from the provider. Doubles as the key test. */
 export async function listModels(p: { provider: ProviderKind; apiKey: string; baseUrl?: string | null }): Promise<string[]> {
   const get = async (url: string, headers: Record<string, string>) => {
     let res: Response;
@@ -73,7 +86,7 @@ export async function listModels(p: { provider: ProviderKind; apiKey: string; ba
       ids = (await get(`${p.baseUrl.replace(/\/$/, '')}/models`, bearer)).data.map((m: any) => m.id);
       break;
   }
-  return [...new Set(ids)].sort();
+  return [...new Set(ids)].filter(canUseTools).sort();
 }
 
 export async function providerFor(orgId: string, id: string) {
