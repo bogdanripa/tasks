@@ -36,6 +36,7 @@ export type Pending = {
   itemId: string | null;
   itemAssigneeId: string | null;
   itemInBacklog: boolean;
+  itemBlocked: boolean;
 };
 
 /** A run with no API activity for this long is treated as over (crashed, stuck or finished without a status change). */
@@ -129,7 +130,7 @@ How to work (from Tasks):
 2. Read the task, including comments and links: curl -s ${auth} $TASKS/api/items/${item.ref}
 3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
 4. Comment with what you did, then set its status: "${done}" when finished, or another column (e.g. for review). Any status other than "${p.working ?? '-'}" ends your run.
-5. Stop. Tasks starts a new run when something changes.
+5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.
 If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines. Never put the API token in comments.
 ${guidelines(`Project guidelines (${project.name})`, project.guidelines)}${guidelines('Organization guidelines', p.orgGuidelines)}
 Task: ${item.ref} (${item.type}) ${q(item.title)}
@@ -196,7 +197,10 @@ export async function processRoutineQueue(rows: Pending[]) {
     // Backlog is parked work: no runs. Moving the item out of Backlog is itself a change, so that starts one.
     const parked = agentRows.filter((r) => !stale.includes(r) && r.itemInBacklog);
     if (parked.length) await markRows(parked.map((r) => r.id), 'skipped', 'in backlog');
-    const live = agentRows.filter((r) => !stale.includes(r) && !parked.includes(r));
+    // Waiting on an unfinished blocker: no runs. The last blocker finishing sends "unblocked", which starts one.
+    const blocked = agentRows.filter((r) => !stale.includes(r) && !parked.includes(r) && r.itemBlocked);
+    if (blocked.length) await markRows(blocked.map((r) => r.id), 'skipped', 'blocked');
+    const live = agentRows.filter((r) => !stale.includes(r) && !parked.includes(r) && !blocked.includes(r));
     if (!live.length) continue;
 
     const busy = await agentBusyUntil(agentId, live[0].agentOrgId);

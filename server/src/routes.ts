@@ -106,7 +106,9 @@ export function apiRoutes(app: FastifyInstance) {
     const [deliveries, runs, [queue], [pause]] = await Promise.all([
       sql`
         select n.id, n.reason, n.delivery_status, n.attempts, n.last_error, n.created_at, n.read_at, n.next_attempt_at, v.ref as item_ref,
-               coalesce(lower(v.status) = 'backlog', false) as item_in_backlog
+               coalesce(lower(v.status) = 'backlog', false) as item_in_backlog,
+               exists (select 1 from links l join items b on b.id = l.from_id
+                       where l.to_id = n.item_id and l.kind = 'blocks' and l.removed_at is null and b.closed_at is null) as item_blocked
         from notifications n left join item_view v on v.id = n.item_id
         where n.account_id = ${agent.id} order by n.id desc limit 30`,
       sql`

@@ -36,6 +36,7 @@ export default function ItemPage() {
   };
 
   const outgoing = links.filter((l: any) => l.outgoing);
+  const openBlockers = links.filter((l: any) => !l.outgoing && l.kind === 'blocks' && !l.done);
   const incoming = links.filter((l: any) => !l.outgoing);
 
   return (
@@ -181,9 +182,16 @@ export default function ItemPage() {
           </label>
           {item.assigneeKind === 'agent' && (
             <p className="muted small">
-              {item.status.toLowerCase() === 'backlog'
-                ? `In Backlog, so ${item.assigneeName} isn’t pinged. Move it out of Backlog to start the agent.`
-                : `${item.assigneeName} is pinged once this item has been left alone for a couple of minutes after a change.`}
+              {item.status.toLowerCase() === 'backlog' ? (
+                `In Backlog, so ${item.assigneeName} isn’t pinged. Move it out of Backlog to start the agent.`
+              ) : openBlockers.length ? (
+                <>
+                  Waiting on {openBlockers.map((l: any, n: number) => <span key={l.id}>{n > 0 && ', '}<RefLink refStr={l.ref} /></span>)}, so{' '}
+                  {item.assigneeName} isn’t pinged until {openBlockers.length > 1 ? 'they’re' : 'it’s'} done.
+                </>
+              ) : (
+                `${item.assigneeName} is pinged once this item has been left alone for a couple of minutes after a change.`
+              )}
             </p>
           )}
           <div className="side-meta muted small">

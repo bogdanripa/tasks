@@ -19,6 +19,8 @@ async function deliverDue() {
     select n.id, n.reason, n.attempts, n.created_at, n.item_id, a.id as agent_id, a.name as agent_name, a.org_id as agent_org_id,
            a.webhook_url, a.webhook_secret, a.routine_url, a.routine_token_enc, v.assignee_id as item_assignee_id,
            lower(v.status) = 'backlog' as item_in_backlog,
+           exists (select 1 from links l join items b on b.id = l.from_id
+                   where l.to_id = n.item_id and l.kind = 'blocks' and l.removed_at is null and b.closed_at is null) as item_blocked,
            e.type as event_type, e.data as event_data, actor.name as actor_name, actor.kind as actor_kind,
            v.ref as item_ref, v.title as item_title, v.type as item_type, v.status as item_status
     from notifications n
@@ -39,9 +41,9 @@ async function deliverDue() {
         await sql`update notifications set delivery_status = null where id = ${n.id}`;
         return;
       }
-      if (n.itemInBacklog) {
-        // Parked work: stays in the inbox, no ping. Moving it out of Backlog pings.
-        await sql`update notifications set delivery_status = 'skipped', last_error = 'in backlog' where id = ${n.id}`;
+      if (n.itemInBacklog || n.itemBlocked) {
+        // Parked or waiting on a blocker: stays in the inbox, no ping. Leaving Backlog / the last blocker finishing pings.
+        await sql`update notifications set delivery_status = 'skipped', last_error = ${n.itemInBacklog ? 'in backlog' : 'blocked'} where id = ${n.id}`;
         return;
       }
       const body = JSON.stringify({

@@ -239,6 +239,7 @@ function groupDeliveries(rows: any[], mode: Mode) {
 
 const SKIP_REASONS: Record<string, string> = {
   'in backlog': 'in Backlog',
+  blocked: 'blocked by an open item',
   'not assigned to this agent': 'no longer assigned',
   throttled: 'run limit reached',
   'agent deleted': 'agent deleted',
@@ -250,6 +251,7 @@ function DeliveryState({ n, mode }: { n: any; mode: Mode }) {
     switch (n.deliveryStatus) {
       case 'pending': {
         if (n.itemInBacklog) return ['', 'in Backlog · won’t ping'];
+        if (n.itemBlocked) return ['', 'blocked · won’t ping'];
         const secs = Math.round((new Date(n.nextAttemptAt).getTime() - Date.now()) / 1000);
         if (secs <= 0) return ['pending', 'sending…'];
         const wait = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;

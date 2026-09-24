@@ -286,6 +286,26 @@ await new Promise((r) => setTimeout(r, 1500));
 assert.equal(fires.length, 6, 'no second run for the leftover update');
 console.log('✓ a run takes all pending updates on its item');
 
+// Waiting on humans: while an open item blocks the agent's task, nothing wakes it; the last blocker finishing does.
+await api('PATCH', `/api/items/${r2.ref}`, { status: 'Done' }, tokenOf(fires[5].text)); // end run 6
+const r3 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Rotate DB password', status: 'Todo' });
+const h1 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Approve downtime', status: 'Todo', assignee: `alice-${run}@example.com` });
+const h2 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Share vault access', status: 'Todo', assignee: `alice-${run}@example.com` });
+await api('POST', '/api/links', { from: h1.ref, to: r3.ref, kind: 'blocks' });
+await api('POST', '/api/links', { from: h2.ref, to: r3.ref, kind: 'blocks' });
+await api('PATCH', `/api/items/${r3.ref}`, { assignee: rAgent.agent.id });
+await api('POST', `/api/comments/${r3.ref}`, { body: 'any update?' });
+await api('PATCH', `/api/items/${h1.ref}`, { status: 'Done' }); // one blocker left
+await new Promise((r) => setTimeout(r, 2500));
+assert.equal(fires.length, 6, 'no run while blocked');
+const blockedRows = (await api('GET', `/api/agents/${rAgent.agent.id}`)).deliveries.filter((n: any) => n.itemRef === r3.ref);
+assert.ok(blockedRows.length >= 3 && blockedRows.every((n: any) => n.lastError === 'blocked'), 'assigned, commented, first unblocked: all held');
+await api('PATCH', `/api/items/${h2.ref}`, { status: 'Done' }); // last blocker
+await waitFor(() => fires.length === 7, 'run once the last blocker is done');
+assert.match(fires[6].text, new RegExp(`Task: ${r3.ref}`));
+assert.match(fires[6].text, /"Share vault access", which blocked this, is done/);
+console.log('✓ blocked tasks don\'t wake agents; the last blocker finishing does');
+
 // Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);
 fake.close();
