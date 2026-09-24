@@ -344,8 +344,14 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .state.ready { color: var(--accent); }
 .state.waiting { color: var(--muted); }
 
-.not-connected { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; color: var(--issue); min-width: 0; }
-.not-connected .small { white-space: normal; line-height: 1.3; }
+.not-connected { position: relative; display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+.not-connected .warn-icon { cursor: help; }
+.not-connected .tip {
+  display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: 260px;
+  background: var(--text); color: var(--surface); font-size: 12px; line-height: 1.4; padding: 8px 10px; border-radius: 6px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.15); white-space: normal;
+}
+.not-connected .warn-icon:hover + .tip, .not-connected .warn-icon:focus + .tip { display: block; }
 .people li { flex-wrap: wrap; }
 .warn-icon { width: 18px; height: 18px; border-radius: 50%; background: var(--issue); color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center; flex: none; }
 .not-connected + .skills, .not-connected + .skills-edit { margin-left: 0; }
