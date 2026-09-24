@@ -890,6 +890,19 @@ const rDeliveries = (await api('GET', `/api/agents/${rAgent.agent.id}`)).deliver
 const note = rDeliveries.find((d: any) => d.reason === 'commented');
 assert.ok(note && note.deliveryStatus === null, 'an agent’s comment doesn’t start another agent’s run');
 console.log('✓ agents’ comments reach inboxes without starting runs');
+// A run cut off by a restart: the next run on the item is told what it already did.
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-worker' } });
+const cut = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Cut off midway', status: 'Todo', assignee: house.agent.id });
+const cutRun = await runFor(cut.ref);
+await db`update agent_runs set error = 'Tasks restarted during the run; queued again' where id = ${cutRun.id}`;
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
+await api('POST', `/api/comments/${cut.ref}`, { body: 'carry on' });
+for (let i = 0; i < 100 && (await api('GET', `/api/agents/${house.agent.id}`)).runs.filter((r: any) => r.itemRef === cut.ref).length < 2; i++) await new Promise((r) => setTimeout(r, 100));
+const resumedRun = (await api('GET', `/api/agents/${house.agent.id}`)).runs.find((r: any) => r.itemRef === cut.ref && r.id !== cutRun.id);
+const resumedPrompt = (await api('GET', `/api/runs/${resumedRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text;
+assert.match(resumedPrompt, /Your previous run on this was cut off .*What it already did/s);
+assert.match(resumedPrompt, /- comment .*Built the Pong page/);
+console.log('✓ a run cut off by a restart is continued, not redone');
 const workMe = await api('GET', '/api/work?assignee=me');
 assert.ok(workMe.items.some((i: any) => i.ref === loose.ref), 'my open work, across projects');
 const workHouse = await api('GET', `/api/work?assignee=${house.agent.id}`);
@@ -990,7 +1003,8 @@ assert.equal((await api('POST', `/api/schedules/${daily.id}/run`)).skipped, true
 await api('PATCH', `/api/schedules/${daily.id}`, { ...scheduleIn, skipIfOpen: false });
 await db`update schedules set next_run_at = now() - interval '5 hours' where id = ${daily.id}`;
 const nudge = await api('POST', `/api/projects/${org}/WEB/schedules`, { ...scheduleIn, name: 'nudge', enabled: false }); // saving wakes the scheduler
-const countChecks = async () => (await api('GET', `/api/projects/${org}/WEB`)).items.filter((i: any) => i.title === `Pi check ${today}`).length;
+// The catch-up is dated for the slot it makes up (5 hours ago: yesterday, just after midnight), so count by prefix.
+const countChecks = async () => (await api('GET', `/api/projects/${org}/WEB`)).items.filter((i: any) => i.title.startsWith('Pi check ')).length;
 for (let i = 0; i < 30 && (await countChecks()) < 2; i++) await new Promise((r) => setTimeout(r, 100));
 await new Promise((r) => setTimeout(r, 500));
 assert.equal(await countChecks(), 2, 'caught up exactly once');

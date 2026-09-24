@@ -40,7 +40,12 @@ export async function ghFetch(path: string, init: RequestInit & { token: string 
     throw new HttpError(502, `GitHub unreachable: ${fetchError(e)}`);
   }
   const body = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new HttpError(res.status === 404 || res.status === 409 ? res.status : 400, `GitHub: ${(body as any)?.message ?? `HTTP ${res.status}`}`);
+  if (!res.ok) {
+    // "Validation Failed" alone says nothing; GitHub puts the reason in errors[] (e.g. "A pull request already exists").
+    const details = ((body as any)?.errors ?? []).map((e: any) => e.message ?? [e.resource, e.field, e.code].filter(Boolean).join(' ')).filter(Boolean);
+    const msg = `GitHub: ${(body as any)?.message ?? `HTTP ${res.status}`}${details.length ? ` (${details.join('; ')})` : ''}`;
+    throw new HttpError(res.status === 404 || res.status === 409 ? res.status : 400, msg);
+  }
   return body as any;
 }
 

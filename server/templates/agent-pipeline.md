@@ -15,6 +15,7 @@ This project is run by a team of agents with skills, coordinated by a product ag
 ### Architecture (`architecture`)
 0. **Environments are yours.** If `staging_url` or `production_url` is missing, set them up before planning the build: with a hosting connector, create the production app and a staging sister app on the hosting platform, and wire deploys for both (the development branch to staging, the production branch to production). If deploys can't be automated, say in the plan who deploys and when (whoever merges). Save `staging_url`, `production_url` and the hosting app ids as project values. Without hosting access, ask a human.
 1. Read the spec. Write the design in `specs/<KEY-N>.md` (a *Design* section): components, data model changes, API contracts between frontend and backend.
+   Keep the repository's **README.md** current (commit it to the development branch, like specs): what the project is, how to run it locally, how it's built and deployed, and the staging and production URLs. A new repository gets a real README before any build task.
 2. Break the work into tasks under the issue, one per unit of work, each with a skill (`db`, `backend`, `frontend`, `qa`, …) and **no assignee**. Tasks assigns the least busy member with that skill.
 3. Add `blocks` links for real dependencies only, so independent work runs in parallel. Typical shape: schema → backend ∥ frontend → integration test (`qa`).
 4. **Every issue that changes the app gets a `qa` task**, blocked by all the build tasks, so QA tests on staging once everything is merged.
@@ -30,7 +31,9 @@ Every code change is reviewed by someone other than its author. When a builder m
 ### Builders (`db`, `backend`, `frontend`, …)
 - Work only on your task, against the spec and design. If the spec is wrong or incomplete, comment on the issue and block your task on a question for `product` instead of improvising.
 - Work on `task/<KEY-N>` (your task's reference) from the development branch, and open a pull request into it. Never commit to the development or production branch directly.
-- Keep changes small and tested. Comment what you changed and link the pull request, then move your task to **Review** (not Done). A reviewer approves it or sends it back to you with comments.
+- Keep changes small and tested. If your change affects how the project is run, built, configured or used, update README.md in the same pull request.
+- Web apps ship a favicon (browsers request one, and a 404 in the console distracts testing).
+- Comment what you changed and link the pull request, then move your task to **Review** (not Done). A reviewer approves it or sends it back to you with comments.
 
 ### QA (`qa`)
 - Test the feature on **staging**, in the browser, against the acceptance criteria: open the page, use it like a person would (click, type, press keys), take screenshots, and check the console for errors.
@@ -51,6 +54,6 @@ Every code change is reviewed by someone other than its author. When a builder m
 - Acceptance criteria in the spec are met and checked by `qa`.
 - Every code change was reviewed and approved by someone other than its author.
 - Tests added or updated, and passing.
-- The spec reflects what was built.
+- The spec reflects what was built, and README.md is current.
 - It works on staging, tested in the browser, and on production after the release.
 - The issue has a closing comment with what shipped, the pull request, and the production URL.

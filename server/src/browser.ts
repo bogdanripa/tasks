@@ -237,6 +237,26 @@ async function snapshot(page: Page) {
 }
 
 const target = (page: Page, t: string) => page.locator(/^e\d+$/.test(t) ? `aria-ref=${t}` : t).first();
+/**
+ * Act on an element: normally first, then once more scrolled into view and forced (a sticky header or an
+ * animation can cover it). If that fails too, say what to do rather than just "timeout".
+ */
+async function onElement(page: Page, t: string, act: (loc: ReturnType<typeof target>, force: boolean) => Promise<void>) {
+  const loc = target(page, t);
+  try {
+    await act(loc, false);
+  } catch {
+    try {
+      await loc.scrollIntoViewIfNeeded({ timeout: 2_000 });
+      await act(loc, true);
+    } catch {
+      throw new Error(
+        `Couldn't reach ${t}: it may be covered, moving, or gone (refs change whenever the page updates). Read the page again for fresh refs, or click by x/y (e.g. inside a canvas).`,
+      );
+    }
+  }
+}
+
 const settle = (page: Page) => page.waitForLoadState('load', { timeout: 5_000 }).catch(() => {}).then(() => page.waitForTimeout(300));
 
 export const browser_ = {
@@ -252,7 +272,7 @@ export const browser_ = {
   },
   async click(runId: string, a: { target?: string; x?: number; y?: number }) {
     const { page } = await session(runId);
-    if (a.target) await target(page, a.target).click();
+    if (a.target) await onElement(page, a.target, (loc, force) => loc.click({ timeout: force ? 3_000 : 5_000, force }));
     else if (a.x !== undefined && a.y !== undefined) await page.mouse.click(a.x, a.y);
     else throw new Error('Give a target (an element ref like e3, or a CSS/text selector) or x and y');
     await settle(page);
@@ -260,7 +280,7 @@ export const browser_ = {
   },
   async type(runId: string, a: { target?: string; text: string; submit?: boolean }) {
     const { page } = await session(runId);
-    if (a.target) await target(page, a.target).fill(a.text);
+    if (a.target) await onElement(page, a.target, (loc, force) => loc.fill(a.text, { timeout: force ? 3_000 : 5_000, force }));
     else await page.keyboard.type(a.text);
     if (a.submit) await page.keyboard.press('Enter');
     await settle(page);

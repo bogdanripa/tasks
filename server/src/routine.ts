@@ -163,6 +163,28 @@ A token limited to this repository (valid until ${r.expiresAt.toISOString()}; ne
 `;
 }
 
+/**
+ * If this agent's last run on the item was cut off (Tasks restarted, or it crashed), what that run already did,
+ * so this one continues instead of starting over (and doesn't open a second PR or branch).
+ */
+async function interruptedRun(agentId: string, itemId: string): Promise<string | null> {
+  const [last] = await sql`
+    select id, steps, error from agent_runs
+    where agent_id = ${agentId} and item_id = ${itemId} and finished_at is not null
+    order by created_at desc limit 1`;
+  if (!last || !/queued again/.test(last.error ?? '')) return null;
+  const calls = await sql`
+    select c.content->>'tool' as tool, c.content->'input' as input, r.content->>'output' as output
+    from run_steps c left join run_steps r on r.run_id = c.run_id and r.kind = 'tool_result' and r.content->>'id' = c.content->>'id'
+    where c.run_id = ${last.id} and c.kind = 'tool_call' order by c.id`;
+  const short = (v: unknown, n: number) => {
+    const t = typeof v === 'string' ? v : JSON.stringify(v ?? '');
+    return t.length > n ? `${t.slice(0, n)}…` : t;
+  };
+  const done = calls.slice(-40).map((c) => `    - ${c.tool} ${short(c.input, 160)} → ${short(c.output, 160)}`);
+  return `Your previous run on this was cut off (${last.error}) after ${last.steps} steps. What it already did, so you can continue rather than redo it (don't open a second pull request, branch or task for the same thing; re-check anything that may have changed):\n${done.join('\n')}`;
+}
+
 function buildPayload(p: {
   /** routine: a Claude Code session using curl; builtin: Tasks runs the agent with tools. */
   mode: 'routine' | 'builtin';
@@ -463,7 +485,8 @@ async function fireRoutine(rows: Pending[]) {
       team, agentName: first.agentName, item, project, parent, token: key.key, expiresAt,
       changes: changeLines,
     });
-  const lines = (commentLimit?: number) => [...new Set(changes.map((c) => describeChange(c, commentLimit)))];
+  const resumed = await interruptedRun(first.agentId, item.id);
+  const lines = (commentLimit?: number) => [...(resumed ? [resumed] : []), ...new Set(changes.map((c) => describeChange(c, commentLimit)))];
   let text = build(lines());
   // Too long for the routine API (many long comments or diffs): shorten comments first, then drop the
   // oldest comments. Assignments, status changes and blocker news are always kept.
