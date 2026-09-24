@@ -8,6 +8,7 @@ import { languageModel, providerFor } from './llm.js';
 import { releaseRun } from './routine.js';
 import { repoOps, type RunRepo } from './github.js';
 import { browser_, browserAvailable, closeSession } from './browser.js';
+import { openConnectors } from './connectors.js';
 
 /**
  * Agents that Tasks runs itself: an LLM with Tasks' own actions as tools, driven by the same payload
@@ -318,8 +319,15 @@ async function execute(run: InHouseRun) {
   const provider = await providerFor(run.agent.orgId, run.providerId);
   if (!provider) return fail(run, 'the agent’s AI provider was removed; choose another on its Connection tab', false);
 
+  // MCP connectors that apply: the org's, the item's project's and the agent's own.
+  const [item] = await sql`select project_id from items where id = ${run.itemId}`;
+  const mcp = await openConnectors(run.agent.orgId, item?.projectId ?? null, run.agent.id);
+  const prompt = mcp.notes.length ? `${run.prompt}\n\n${mcp.notes.join('\n')}` : run.prompt;
   await logStep(run.runId, 'system', { text: run.system });
-  await logStep(run.runId, 'prompt', { text: run.prompt });
+  await logStep(run.runId, 'prompt', { text: prompt });
+  if (mcp.available.length || mcp.notes.length) {
+    await logStep(run.runId, 'note', { text: `Connectors: ${[...mcp.available, ...mcp.notes.map((n) => n.split(':')[0].replace('Connector ', '') + ' (unavailable)')].join(', ')}` });
+  }
   let input = 0;
   let output = 0;
   let steps = 0;
@@ -328,8 +336,8 @@ async function execute(run: InHouseRun) {
     const result = await generateText({
       model: languageModel(provider, run.model),
       system: run.system,
-      prompt: run.prompt,
-      tools: taskTools(actor, run.repo, browserAvailable() ? { runId: run.runId, shots } : null),
+      prompt,
+      tools: { ...taskTools(actor, run.repo, browserAvailable() ? { runId: run.runId, shots } : null), ...mcp.tools },
       stopWhen: [stepCountIs(run.maxSteps), () => runFinished(run.runId)],
       prepareStep: ({ messages }: any) => ({ messages: withScreenshots(messages, shots) }),
       maxRetries: 2,
@@ -357,6 +365,7 @@ async function execute(run: InHouseRun) {
     return fail(run, `the model call failed: ${err.message}`, transient);
   } finally {
     await closeSession(run.runId);
+    await mcp.close();
   }
 
   if (await runFinished(run.runId)) return;

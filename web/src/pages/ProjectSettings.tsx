@@ -7,8 +7,9 @@ import { FormModal } from './Org';
 import { NameField } from './OrgSettings';
 import { SchedulesSection } from './Schedules';
 import { RepositorySection } from './Github';
+import { ConnectorsSection } from './Connectors';
 
-const PROJECT_TABS = ['general', 'guidelines', 'board', 'repository', 'recurring'] as const;
+const PROJECT_TABS = ['general', 'guidelines', 'board', 'repository', 'connectors', 'recurring'] as const;
 
 type Column = { name: string; from: string | null; count: number; skill: string; handoff: string };
 
@@ -39,7 +40,7 @@ export default function ProjectSettings() {
         <span className="sep">›</span>
       </nav>
       <h1>Settings</h1>
-      <Tabs tabs={PROJECT_TABS} labels={{ general: 'General', guidelines: 'Guidelines', board: 'Board columns', repository: 'Repository', recurring: 'Recurring tasks' }} current={tab} onSelect={setTab} />
+      <Tabs tabs={PROJECT_TABS} labels={{ general: 'General', guidelines: 'Guidelines', board: 'Board columns', repository: 'Repository', connectors: 'Connectors', recurring: 'Recurring tasks' }} current={tab} onSelect={setTab} />
 
       {tab === 'general' && (
       <section>
@@ -96,6 +97,12 @@ export default function ProjectSettings() {
       {tab === 'repository' && (
         <section>
           <RepositorySection org={org!} projectKey={key!} project={project} onSaved={reload} />
+        </section>
+      )}
+
+      {tab === 'connectors' && (
+        <section>
+          <ConnectorsSection base={`/api/projects/${org}/${key}`} level="project" />
         </section>
       )}
 

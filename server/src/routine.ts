@@ -8,6 +8,7 @@ import { compactReference } from './apidoc.js';
 import { BROWSER_TOOL_NAMES, inHouseFull, REPO_TOOL_NAMES, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
 import { browserAvailable } from './browser.js';
 import { runRepo, type RunRepo } from './github.js';
+import { runConnectors } from './connectors.js';
 import { structuredPatch } from 'diff';
 
 const RUN_TOKEN_HOURS = 4;
@@ -157,6 +158,8 @@ function buildPayload(p: {
   /** routine: a Claude Code session using curl; builtin: Tasks runs the agent with tools. */
   mode: 'routine' | 'builtin';
   repo?: RunRepo | { error: string } | null;
+  /** MCP connectors the run has (builtin runs): their tools are prefixed name__. */
+  connectors?: string[];
   working?: string;
   /** The hand-off column, when this agent may send the task there (a task, and someone else can review). */
   reviewColumn?: string;
@@ -237,7 +240,7 @@ Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
 ${repoSection(p, item)}
-${builtin ? `Your tools: ${[...TASK_TOOL_NAMES, ...(p.repo && 'token' in p.repo ? REPO_TOOL_NAMES : []), ...(browserAvailable() ? BROWSER_TOOL_NAMES : [])].join(', ')}. They act as ${p.agentName}.${browserAvailable() ? ' The browser_* tools are a real browser on the public internet: test what you build or review there (open the URL, read the page, click, type, press keys, screenshot, check the console) instead of trusting the code alone.' : ''}` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
+${builtin ? `Your tools: ${[...TASK_TOOL_NAMES, ...(p.repo && 'token' in p.repo ? REPO_TOOL_NAMES : []), ...(browserAvailable() ? BROWSER_TOOL_NAMES : [])].join(', ')}. They act as ${p.agentName}.${p.connectors?.length ? ` Connectors (MCP servers; their tools are prefixed with the connector's name): ${p.connectors.map((c) => `${c}__*`).join(', ')}.` : ''}${browserAvailable() ? ' The browser_* tools are a real browser on the public internet: test what you build or review there (open the URL, read the page, click, type, press keys, screenshot, check the console) instead of trusting the code alone.' : ''}` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
 ${compactReference()}`}`;
 }
@@ -413,10 +416,12 @@ async function fireRoutine(rows: Pending[]) {
   // A token limited to the project's repository, for this run (none when the project has no repository).
   const repo = await runRepo(item.projectId).catch((e) => ({ error: (e as Error).message }));
   const reviewColumn = Object.keys(project.columnHandoffs ?? {})[0];
+  const mcpNames = first.runtimeProviderId ? (await runConnectors(item.orgId, item.projectId, first.agentId)).map((c) => c.name as string) : [];
   const build = (changeLines: string[]) =>
     buildPayload({
       mode: first.runtimeProviderId ? 'builtin' : 'routine',
       repo,
+      connectors: mcpNames,
       working: workingColumn(project.columns),
       // Offer Review only where it works: tasks, with someone other than this agent holding the skill.
       reviewColumn: reviewColumn && item.type === 'task' && team.some((m) => m.name !== first.agentName && m.skills.includes(project.columnHandoffs[reviewColumn])) ? reviewColumn : undefined,

@@ -1,3 +1,4 @@
+import { ConnectorsSection } from './Connectors';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
@@ -34,7 +35,7 @@ export function AgentKeyReveal({ apiKey, webhookSecret }: { apiKey: string; webh
 }
 
 type Mode = 'builtin' | 'routine' | 'webhook' | 'poll';
-const AGENT_TABS = ['profile', 'connection', 'activity', 'keys'] as const;
+const AGENT_TABS = ['profile', 'connection', 'connectors', 'activity', 'keys'] as const;
 
 export default function AgentPage() {
   const { id } = useParams();
@@ -88,7 +89,7 @@ export default function AgentPage() {
       )}
       <Tabs
         tabs={AGENT_TABS}
-        labels={{ profile: 'Profile', connection: current === 'poll' ? 'Connection' : `Connection ✓`, activity: 'Activity', keys: 'API keys' }}
+        labels={{ profile: 'Profile', connection: current === 'poll' ? 'Connection' : `Connection ✓`, connectors: 'Connectors', activity: 'Activity', keys: 'API keys' }}
         current={tab}
         onSelect={setTab}
       />
@@ -197,6 +198,12 @@ export default function AgentPage() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {tab === 'connectors' && (
+        <section>
+          <ConnectorsSection base={`/api/agents/${id}`} level="agent" />
         </section>
       )}
 

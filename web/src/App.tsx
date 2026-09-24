@@ -1,3 +1,4 @@
+import { Toaster } from './toast';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, get, type Me } from './api';
@@ -42,6 +43,7 @@ export default function App() {
   return (
     <SessionContext.Provider value={{ me, refreshMe }}>
       <TopBar me={me} />
+      <Toaster />
       <main>
         <Routes>
           <Route path="/" element={<Home />} />

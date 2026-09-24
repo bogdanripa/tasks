@@ -1,10 +1,26 @@
+import { toast } from './toast';
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
 }
 
-export async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+// Changes that confirm themselves on screen (the board, comments, links, reading the inbox) don't toast.
+const QUIET = [/^\/api\/items\//, /\/items$/, /^\/api\/comments\//, /^\/api\/links/, /^\/api\/notifications/, /^\/api\/me\b/, /^\/api\/inbox\//, /^\/auth\//, /\/test$/, /\/read$/, /\/models$/];
+
+function confirmation(method: string, path: string) {
+  if (method === 'GET' || QUIET.some((re) => re.test(path))) return null;
+  if (method === 'DELETE') return 'Removed';
+  if (method !== 'POST') return 'Saved';
+  if (/\/runs\/[^/]+\/end$/.test(path)) return 'Run ended';
+  if (/\/schedules\/[^/]+\/run$/.test(path)) return 'Started';
+  if (/\/invites$/.test(path)) return 'Invitation sent';
+  if (/\/keys$/.test(path)) return 'Key created';
+  return 'Added';
+}
+
+export async function api<T = any>(method: string, path: string, body?: unknown, opts: { toast?: string | false } = {}): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : {},
@@ -13,6 +29,8 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, json.error ?? res.statusText);
+  const done = opts.toast === false ? null : opts.toast ?? confirmation(method, path.split('?')[0]);
+  if (done) toast(done);
   return json as T;
 }
 

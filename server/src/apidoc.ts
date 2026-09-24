@@ -47,7 +47,7 @@ type Input<D extends Doc> = {
 /** Register a documented route; the handler receives the validated body and query. */
 export function route<D extends Doc>(
   app: FastifyInstance,
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   url: string,
   doc: D,
   handler: (req: FastifyRequest<{ Params: Record<string, string> }>, input: Input<D>, reply: FastifyReply) => Promise<unknown>,

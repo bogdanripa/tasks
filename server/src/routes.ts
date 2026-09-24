@@ -11,6 +11,7 @@ import { fullReference, route } from './apidoc.js';
 import * as sched from './schedules.js';
 import * as llm from './llm.js';
 import * as github from './github.js';
+import * as connectors from './connectors.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
@@ -131,6 +132,70 @@ export function apiRoutes(app: FastifyInstance) {
   });
 
   // ---- GitHub ----
+  // ---- MCP connectors (org, project and agent level) ----
+  const connectorBody = z.object({
+    name: z.string().min(2).max(31),
+    url: z.string().min(8).max(2000),
+    auth: z.enum(['none', 'header', 'oauth']),
+    headerName: z.string().max(100).optional(),
+    headerValue: z.string().max(4000).optional().describe('e.g. "Bearer <key>"; stored encrypted, never returned'),
+    allowedTools: z.array(z.string()).nullable().optional().describe('null: every tool the server offers'),
+  });
+  route(app, 'GET', '/api/orgs/:org/connectors', { section: 'Connectors', summary: 'the org’s MCP connectors (every agent Tasks runs gets them; admins)' }, async (req) =>
+    connectors.listConnectors(await requireActor(req), { org: req.params.org }),
+  );
+  route(app, 'POST', '/api/orgs/:org/connectors', { section: 'Connectors', summary: 'add an MCP connector for the whole org (admins)', body: connectorBody }, async (req, { body }) =>
+    connectors.createConnector(await requireActor(req), { org: req.params.org }, body),
+  );
+  route(app, 'GET', '/api/projects/:org/:key/connectors', { section: 'Connectors', summary: 'a project’s MCP connectors, and the org’s it inherits (admins)' }, async (req) =>
+    connectors.listConnectors(await requireActor(req), { org: req.params.org, project: req.params.key }),
+  );
+  route(app, 'POST', '/api/projects/:org/:key/connectors', { section: 'Connectors', summary: 'add an MCP connector for agents working on this project (admins)', body: connectorBody }, async (req, { body }) =>
+    connectors.createConnector(await requireActor(req), { org: req.params.org, project: req.params.key }, body),
+  );
+  route(app, 'GET', '/api/agents/:id/connectors', { section: 'Connectors', summary: 'an agent’s own MCP connectors, and the org and project ones it can switch on (admins)' }, async (req) =>
+    connectors.listConnectors(await requireActor(req), { org: '', agent: req.params.id }),
+  );
+  route(app, 'POST', '/api/agents/:id/connectors', { section: 'Connectors', summary: 'add an MCP connector for this agent only (admins)', body: connectorBody }, async (req, { body }) =>
+    connectors.createConnector(await requireActor(req), { org: '', agent: req.params.id }, body),
+  );
+  route(app, 'PUT', '/api/agents/:id/connectors/:connector', {
+    section: 'Connectors',
+    summary: 'switch an org or project connector on or off for this agent (admins)',
+    body: z.object({ enabled: z.boolean() }),
+  }, async (req, { body }) => connectors.setAgentConnector(await requireActor(req), req.params.id, req.params.connector, body.enabled));
+  route(app, 'PATCH', '/api/connectors/:id', {
+    section: 'Connectors',
+    summary: 'change a connector’s URL, header or allowed tools (admins)',
+    body: z.object({ url: z.string().optional(), headerName: z.string().optional(), headerValue: z.string().optional(), allowedTools: z.array(z.string()).nullable().optional() }),
+  }, async (req, { body }) => connectors.updateConnector(await requireActor(req), req.params.id, body));
+  route(app, 'DELETE', '/api/connectors/:id', { section: 'Connectors', summary: 'remove a connector (admins)' }, async (req) => {
+    await connectors.deleteConnector(await requireActor(req), req.params.id);
+    return { ok: true };
+  });
+  route(app, 'POST', '/api/connectors/:id/test', { section: 'Connectors', summary: 'connect and list the server’s tools, with which ones agents may use (admins)' }, async (req) =>
+    connectors.testConnector(await requireActor(req), req.params.id),
+  );
+  route(app, 'GET', '/api/connectors/:id/oauth', { section: 'Connectors', summary: 'sign an OAuth connector in (admins; redirects to the server’s sign-in)' }, async (req, _input, reply) => {
+    try {
+      const r = await connectors.oauthStart(await requireActor(req), req.params.id);
+      return reply.redirect(r.url ?? r.returnTo!);
+    } catch (e) {
+      return reply.redirect(`/app/?connector_error=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+  route(app, 'GET', '/api/connectors/oauth/callback', {
+    section: 'Connectors',
+    summary: 'where an MCP server’s OAuth sign-in returns',
+    query: z.object({ code: z.string().optional(), state: z.string().optional(), error: z.string().optional() }),
+  }, async (req, { query }, reply) => {
+    try {
+      return reply.redirect(await connectors.oauthCallback(await requireActor(req), query));
+    } catch (e) {
+      return reply.redirect(`/app/?connector_error=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+
   route(app, 'GET', '/api/orgs/:org/github', { section: 'GitHub', summary: 'whether the org has the Tasks GitHub App installed, and which repositories it can reach' }, async (req) =>
     github.orgGithub(await requireActor(req), req.params.org),
   );

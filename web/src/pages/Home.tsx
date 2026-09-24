@@ -19,6 +19,7 @@ export default function Home() {
   return (
     <div className="page narrow">
       {params.get('github_error') && <ErrorNote error={`GitHub wasn’t connected: ${params.get('github_error')}`} />}
+      {params.get('connector_error') && <ErrorNote error={`The connector wasn’t signed in: ${params.get('connector_error')}`} />}
       {q && (
         <section>
           <h2>Results for “{q}”</h2>

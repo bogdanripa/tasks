@@ -4,6 +4,9 @@ import http from 'node:http';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import postgres from 'postgres';
+import { z } from 'zod';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 // Direct DB access, only to simulate time passing for the scheduler.
 const db = postgres(process.env.DATABASE_URL ?? 'postgres://tasks:tasks@localhost:5434/tasks', { onnotice: () => {} });
@@ -411,13 +414,14 @@ fake.close();
 
 // ---- Agents Tasks runs itself (fake OpenAI-compatible model that scripts tool calls) ----
 const modelCalls: Record<string, number> = {};
-const imagesSeen: number[] = []; // per fake-qa request: how many screenshots it was shown
+const imagesSeen: number[] = [];
+const mcpToolsSeen: string[][] = []; // per fake-qa request: how many screenshots it was shown
 const llmServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'text-embedding-3-small'].map((id) => ({ id })) });
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'fake-mcp', 'text-embedding-3-small'].map((id) => ({ id })) });
     const b = JSON.parse(body);
     modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
     const userText = b.messages.find((m: any) => m.role === 'user')?.content;
@@ -451,6 +455,15 @@ const llmServer = http.createServer((req, res) => {
       ];
       if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
       return say('Shipped.');
+    }
+    if (b.model === 'fake-mcp') {
+      mcpToolsSeen.push((b.tools ?? []).map((t: any) => t.function.name));
+      const out = String(b.messages.filter((m: any) => m.role === 'tool')[0]?.content ?? '');
+      const hasOps = (b.tools ?? []).some((t: any) => t.function.name === 'ops__add');
+      if (toolsSoFar === 0 && hasOps) return call('ops__add', { a: 2, b: 3 });
+      if (toolsSoFar <= 1) return call('comment', { ref, body: `ops said ${out}` });
+      if (toolsSoFar === 2) return call('update_item', { ref, status: 'Done' });
+      return say('ok');
     }
     if (b.model === 'fake-pm') {
       const steps: [string, unknown][] = [
@@ -708,6 +721,69 @@ await api('PATCH', `/api/items/${topUps[0].ref}`, { status: 'Done' });
 for (let i = 0; i < 80 && (await api('GET', `/api/agents/${house.agent.id}`)).runs.filter((r: any) => r.finishedAt).length < runsBefore + 2; i++) await new Promise((r) => setTimeout(r, 100));
 assert.ok((await api('GET', `/api/agents/${house.agent.id}`)).runs.length >= runsBefore + 2, 'topping up wakes the agent on both items');
 console.log('✓ out of credits: no retries, one top-up task for a human that blocks the work, done → agents resume');
+
+// ---- MCP connectors: org, project and agent level; allowed tools; header auth ----
+const mcpHttp = http.createServer(async (req, res) => {
+  if (req.url === '/secure' && req.headers.authorization !== 'Bearer ops-key') {
+    res.writeHead(401, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({ error: 'missing bearer token' }));
+  }
+  if (req.method !== 'POST') return res.writeHead(405).end();
+  let raw = '';
+  for await (const c of req) raw += c;
+  const server = new McpServer({ name: 'ops', version: '1.0.0' });
+  server.registerTool('add', { description: 'Add two numbers', inputSchema: { a: z.number(), b: z.number() } }, async ({ a, b }: any) => ({ content: [{ type: 'text', text: String(a + b) }] }));
+  server.registerTool('echo', { description: 'Echo text', inputSchema: { text: z.string() } }, async ({ text }: any) => ({ content: [{ type: 'text', text }] }));
+  server.registerTool('danger', { description: 'Delete everything', inputSchema: {} }, async () => ({ content: [{ type: 'text', text: 'deleted' }] }));
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  res.on('close', () => { transport.close(); server.close(); });
+  await server.connect(transport);
+  await transport.handleRequest(req, res, JSON.parse(raw));
+});
+await new Promise<void>((r) => mcpHttp.listen(4563, r));
+await assert.rejects(api('POST', `/api/orgs/${org}/connectors`, { name: 'Bad Name', url: 'http://localhost:4563/secure', auth: 'none' }), /lowercase/);
+const opsConn = await api('POST', `/api/orgs/${org}/connectors`, { name: 'ops', url: 'http://localhost:4563/secure', auth: 'header', headerValue: 'Bearer wrong' });
+await assert.rejects(api('POST', `/api/connectors/${opsConn.id}/test`), /Couldn’t connect/);
+await api('PATCH', `/api/connectors/${opsConn.id}`, { headerValue: 'Bearer ops-key' });
+assert.deepEqual((await api('POST', `/api/connectors/${opsConn.id}/test`)).map((t: any) => t.name).sort(), ['add', 'danger', 'echo']);
+await api('PATCH', `/api/connectors/${opsConn.id}`, { allowedTools: ['add', 'echo'] });
+assert.deepEqual((await api('POST', `/api/connectors/${opsConn.id}/test`)).filter((t: any) => t.allowed).map((t: any) => t.name).sort(), ['add', 'echo']);
+await assert.rejects(api('POST', `/api/orgs/${org}/connectors`, { name: 'ops', url: 'http://localhost:4563/open', auth: 'none' }), /already exists/);
+await api('POST', `/api/projects/${org}/WEB/connectors`, { name: 'proj', url: 'http://localhost:4563/open', auth: 'none', allowedTools: ['echo'] });
+await api('POST', `/api/agents/${house.agent.id}/connectors`, { name: 'mine', url: 'http://localhost:4563/open', auth: 'none', allowedTools: ['echo'] });
+await api('POST', `/api/orgs/${org}/connectors`, { name: 'broken', url: 'http://localhost:4599/mcp', auth: 'none' });
+let houseConn = await api('GET', `/api/agents/${house.agent.id}/connectors`);
+assert.deepEqual([houseConn.connectors.map((c: any) => c.name), houseConn.available.map((c: any) => `${c.name}:${c.enabled}`)], [['mine'], ['broken:false', 'ops:false', 'proj:false']]);
+assert.equal(houseConn.available[1].hasHeaderValue, true);
+// Org and project connectors are opt-in per agent.
+for (const c of houseConn.available) await api('PUT', `/api/agents/${house.agent.id}/connectors/${c.id}`, { enabled: true });
+houseConn = await api('GET', `/api/agents/${house.agent.id}/connectors`);
+assert.ok(houseConn.available.every((c: any) => c.enabled));
+assert.ok(!JSON.stringify(houseConn).includes('ops-key'), 'header values are never returned');
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-mcp' } });
+const mcpItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Use the ops connector', status: 'Todo', assignee: house.agent.id });
+const mcpRun = await runFor(mcpItem.ref);
+assert.equal(mcpRun.error, null);
+const mcpSeen = mcpToolsSeen[0];
+assert.ok(['ops__add', 'ops__echo', 'proj__echo', 'mine__echo'].every((t) => mcpSeen.includes(t)), `org, project and agent tools: ${mcpSeen.filter((t) => t.includes('__'))}`);
+assert.ok(!mcpSeen.includes('ops__danger') && !mcpSeen.includes('proj__add'), 'only allowed tools');
+assert.match((await api('GET', `/api/items/${mcpItem.ref}`)).comments.at(-1).body, /ops said 5/);
+const mcpSteps = (await api('GET', `/api/runs/${mcpRun.id}`)).steps;
+assert.match(mcpSteps.find((s: any) => s.kind === 'prompt').content.text, /ops__\*/);
+assert.match(mcpSteps.find((s: any) => s.kind === 'prompt').content.text, /Connector "broken" is unavailable/);
+// Another project: its items don't get WEB's connector.
+const apiItem = await api('POST', `/api/projects/${org}/API/items`, { type: 'issue', title: 'Elsewhere', status: 'Todo', assignee: house.agent.id });
+mcpToolsSeen.length = 0;
+await runFor(apiItem.ref);
+assert.ok(mcpToolsSeen[0].includes('ops__add') && mcpToolsSeen[0].includes('mine__echo') && !mcpToolsSeen[0].includes('proj__echo'));
+// Switched off: gone from the next run.
+await api('PUT', `/api/agents/${house.agent.id}/connectors/${opsConn.id}`, { enabled: false });
+const offItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Without ops', status: 'Todo', assignee: house.agent.id });
+mcpToolsSeen.length = 0;
+await runFor(offItem.ref);
+assert.ok(!mcpToolsSeen[0].includes('ops__add') && mcpToolsSeen[0].includes('proj__echo') && mcpToolsSeen[0].includes('mine__echo'));
+mcpHttp.close();
+console.log('✓ MCP connectors: org + project (switched on per agent) + agent level, allowed tools only, header auth, secrets hidden, unavailable ones noted');
 
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });

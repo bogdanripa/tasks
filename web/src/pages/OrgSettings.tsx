@@ -7,8 +7,9 @@ import { AgentKeyReveal } from './Agent';
 import { FormModal, NotConnected } from './Org';
 import { ProvidersSection } from './Providers';
 import { GithubSection } from './Github';
+import { ConnectorsSection } from './Connectors';
 
-const ORG_TABS = ['general', 'guidelines', 'people', 'agents', 'ai', 'github'] as const;
+const ORG_TABS = ['general', 'guidelines', 'people', 'agents', 'ai', 'connectors', 'github'] as const;
 
 export default function OrgSettings() {
   const { org } = useParams();
@@ -48,7 +49,7 @@ export default function OrgSettings() {
   return (
     <div className="page narrow settings">
       <h1>Settings</h1>
-      <Tabs tabs={ORG_TABS} labels={{ general: 'General', guidelines: 'Guidelines', people: 'People', agents: 'Agents', ai: 'AI providers', github: 'GitHub' }} current={tab} onSelect={setTab} />
+      <Tabs tabs={ORG_TABS} labels={{ general: 'General', guidelines: 'Guidelines', people: 'People', agents: 'Agents', ai: 'AI providers', connectors: 'Connectors', github: 'GitHub' }} current={tab} onSelect={setTab} />
 
       {tab === 'general' && (
       <section>
@@ -156,6 +157,12 @@ export default function OrgSettings() {
       {tab === 'ai' && (
         <section>
           <ProvidersSection org={org!} />
+        </section>
+      )}
+
+      {tab === 'connectors' && (
+        <section>
+          <ConnectorsSection base={`/api/orgs/${org}`} level="org" />
         </section>
       )}
 

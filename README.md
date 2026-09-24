@@ -160,6 +160,18 @@ An admin installs the **Tasks GitHub App** for the organization (Settings → Gi
 
 Server env: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY_B64`. The app's callback URL is `/api/github/callback` and its webhook URL is `/api/github/webhook`. Code: `server/src/github.ts`.
 
+### MCP connectors
+
+Agents that Tasks runs can use remote MCP servers (Streamable HTTP, or HTTP+SSE):
+
+- **Where they're defined:** Organization settings → Connectors, Project settings → Connectors, or an agent's Connectors tab.
+- **Opt-in per agent:** org and project connectors are *available*; each agent switches on the ones it uses. A project's connector applies only while the agent works on that project's items. An agent's own connectors always apply.
+- **Tools:** each tool is named `<connector>__<tool>` (e.g. `pironman__apps_list`). *Test & tools* connects, lists the server's tools, and lets an admin choose which ones agents may use, so a connector can be shared without its dangerous tools.
+- **Auth:** none, a header (e.g. `Authorization: Bearer <key>`, stored encrypted and never returned), or OAuth (discovery, dynamic client registration, PKCE; tokens stored encrypted and refreshed).
+- **In a run:** connectors open at the start and close at the end; one that can't connect is left out with a note telling the agent to ask a human. Every call is in the transcript.
+
+Code: `server/src/connectors.ts`.
+
 ### Routine agents (Claude Code cloud routines)
 
 Each agent can have its own routine at claude.ai/code/routines with a **Call via API** trigger. The agent page walks through the setup: the Instructions to paste, the domain the routine's cloud environment must allow (**Network access → Custom**), and where to paste the routine's URL and token. The token is stored encrypted with `SECRETS_KEY`.
