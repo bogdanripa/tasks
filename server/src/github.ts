@@ -51,6 +51,18 @@ export async function installationToken(installationId: number | string, repo?: 
   return { token: t.token as string, expiresAt: new Date(t.expires_at) };
 }
 
+/** Every repository an installation can reach (GitHub pages them 100 at a time). */
+async function installationRepos(installationId: number | string): Promise<string[]> {
+  const { token } = await installationToken(installationId);
+  const out: string[] = [];
+  for (let page = 1; page <= 20; page++) {
+    const res = await ghFetch(`/installation/repositories?per_page=100&page=${page}`, { token });
+    out.push(...res.repositories.map((r: any) => r.full_name as string));
+    if (res.repositories.length < 100 || out.length >= (res.total_count ?? Infinity)) break;
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
 // ---------- installing the app for an org ----------
 
 const STATE_COOKIE = 'gh_install';
@@ -154,8 +166,7 @@ export async function orgGithub(actor: Actor, slug: string) {
   let repos: string[] = [];
   let error: string | null = null;
   try {
-    const { token } = await installationToken(row.installationId);
-    repos = (await ghFetch('/installation/repositories?per_page=100', { token })).repositories.map((r: any) => r.full_name).sort();
+    repos = await installationRepos(row.installationId);
   } catch (e) {
     error = (e as Error).message;
   }
@@ -179,8 +190,7 @@ export async function setProjectRepo(actor: Actor, projectRef: string, input: { 
   if (input.repo) {
     const [inst] = await sql`select installation_id from org_github where org_id = ${project.orgId}`;
     if (!inst) throw badRequest('Connect GitHub for this organization first (Settings → GitHub)');
-    const { token } = await installationToken(inst.installationId);
-    const repos: string[] = (await ghFetch('/installation/repositories?per_page=100', { token })).repositories.map((r: any) => r.full_name);
+    const repos = await installationRepos(inst.installationId);
     if (!repos.some((r) => r.toLowerCase() === input.repo!.toLowerCase())) throw badRequest(`The GitHub App can’t access ${input.repo}. Add it to the installation on GitHub first.`);
   }
   const [row] = await sql`

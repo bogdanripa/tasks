@@ -545,7 +545,12 @@ const ghServer = http.createServer((req, res) => {
     const b = body ? JSON.parse(body) : {};
     ghCalls.push(`${req.method} ${p}`);
     if (req.method === 'POST' && /^\/app\/installations\/777\/access_tokens$/.test(p)) { tokenRequests.push(b); return send(201, { token: `ghs_run${tokenRequests.length}`, expires_at: new Date(Date.now() + 3600_000).toISOString() }); }
-    if (p === '/installation/repositories') return send(200, { repositories: [{ full_name: 'octo/pong' }, { full_name: 'octo/fresh' }] });
+    if (p === '/installation/repositories') {
+      // 150 repositories, 100 per page: the ones the tests use are on page 2.
+      const all = [...Array.from({ length: 148 }, (_, i) => ({ full_name: `octo/filler-${String(i).padStart(3, '0')}` })), { full_name: 'octo/pong' }, { full_name: 'octo/fresh' }];
+      const page = Number(url.searchParams.get('page') ?? 1);
+      return send(200, { total_count: all.length, repositories: all.slice((page - 1) * 100, page * 100) });
+    }
     if (p === '/login/oauth/access_token') return send(200, b.code === 'good' ? { access_token: 'gho_user' } : b.code === 'multi' ? { access_token: 'gho_multi' } : { error: 'bad_verification_code' });
     if (p === '/user/installations') {
       const octo = { id: 777, account: { login: 'octo', type: 'User' } };
@@ -608,7 +613,8 @@ assert.equal(await follow(choices[0].link), `/app/${org2}/settings?tab=github`);
 assert.equal((await api('GET', `/api/orgs/${org2}/github`)).account, 'octo');
 const ghState = await api('GET', `/api/orgs/${org}/github`);
 assert.equal(ghState.account, 'octo');
-assert.deepEqual(ghState.repos, ['octo/fresh', 'octo/pong']);
+assert.equal(ghState.repos.length, 150, 'all pages of repositories');
+assert.ok(ghState.repos.includes('octo/pong') && ghState.repos.includes('octo/fresh'));
 await assert.rejects(api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/secret' }), /can’t access octo\/secret/);
 await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong' });
 // In-house developer: builds on a branch, opens a PR, merges it, publishes Pages, comments the URL.
