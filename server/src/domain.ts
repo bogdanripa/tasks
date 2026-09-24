@@ -746,6 +746,9 @@ const doneColumn = (p: Row) => p.columns[p.columns.length - 1] as string;
 /** True while an agent run on the item is active (fired, not finished, token used recently). */
 const workingSql = (itemId: ReturnType<typeof sql>) => sql`exists (
   select 1 from agent_runs r where r.item_id = ${itemId} and r.status = 'fired' and r.finished_at is null)`;
+/** The run working on this item right now, if any (its live transcript is /app/runs/<id>). */
+const workingRunSql = (itemId: ReturnType<typeof sql>) => sql`(
+  select r.id from agent_runs r where r.item_id = ${itemId} and r.status = 'fired' and r.finished_at is null order by r.created_at desc limit 1)`;
 /** Refs of the open items blocking this one. */
 const blockersSql = (itemId: ReturnType<typeof sql>) => sql`array(
   select b.ref from links l join item_view b on b.id = l.from_id
@@ -757,7 +760,7 @@ export const workingColumn = (columns: string[]) => columns.find((c) => /^(in[ -
 export async function listItems(project: Row, f: { status?: string; type?: ItemType; assigneeId?: string; open?: boolean } = {}) {
   return sql`
     select v.id, v.ref, v.number, v.type, v.title, v.status, v.position, v.assignee_id, v.assignee_name, v.assignee_kind, v.skill,
-           ${workingSql(sql`v.id`)} as working, ${blockersSql(sql`v.id`)} as blocked_by,
+           ${workingSql(sql`v.id`)} as working, ${workingRunSql(sql`v.id`)} as working_run, ${blockersSql(sql`v.id`)} as blocked_by,
            -- An update waiting for the assigned agent: when its run is due (quiet period, or the agent is busy).
            (select min(n.next_attempt_at) from notifications n
             where n.item_id = v.id and n.account_id = v.assignee_id and n.delivery_status = 'pending') as starts_at,
@@ -1101,7 +1104,7 @@ export async function itemDetail(actor: Actor, ref: string) {
     item.parentId ? sql`select ref, title, status, done from item_view where id = ${item.parentId}`.then((r) => r[0]) : null,
     sql`
       select v.ref, v.title, v.status, v.done, v.assignee_name, v.assignee_kind, v.skill,
-             ${workingSql(sql`v.id`)} as working, ${blockersSql(sql`v.id`)} as blocked_by
+             ${workingSql(sql`v.id`)} as working, ${workingRunSql(sql`v.id`)} as working_run, ${blockersSql(sql`v.id`)} as blocked_by
       from item_view v where v.parent_id = ${item.id} order by v.number`,
     // Links the actor can see; the other end may live in another project or org.
     sql`
@@ -1121,7 +1124,8 @@ export async function itemDetail(actor: Actor, ref: string) {
       where e.item_id = ${item.id} or e.item_id in (select id from items where parent_id = ${item.id})
       order by e.id desc limit 300`,
   ]);
-  return { item, project, parent, tasks, links, comments, history };
+  const [{ run: workingRun }] = await sql`select ${workingRunSql(sql`${item.id}::uuid`)} as run`;
+  return { item: { ...item, workingRun }, project, parent, tasks, links, comments, history };
 }
 
 export async function timeline(project: Row, opts: { before?: number; limit?: number } = {}) {

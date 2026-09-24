@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Event } from '../api';
-import { Avatar, EditableMarkdown, ErrorNote, EventRow, KindBadge, Markdown, Modal, SkillChip, RefLink, Time, TypeBadge, linkVerb, useFetch } from '../ui';
+import { Avatar, EditableMarkdown, ErrorNote, EventRow, KindBadge, Markdown, Modal, SkillChip, RefLink, Time, TypeBadge, linkVerb, useFetch, Working } from '../ui';
 
 export default function ItemPage() {
   const { org, ref } = useParams();
@@ -170,6 +170,11 @@ export default function ItemPage() {
         </div>
 
         <aside className="item-side">
+          {item.workingRun && (
+            <p className="small live-run">
+              <Working run={item.workingRun} label={`${item.assigneeName ?? 'An agent'} is working on this`} /> · watch live
+            </p>
+          )}
           <label>
             Status
             <select value={item.status} onChange={(e) => patch({ status: e.target.value })}>
@@ -249,7 +254,7 @@ function SkillField({ value, suggestions, onSave }: { value: string; suggestions
 /** Where a task stands in the plan: done, being worked on, waiting on blockers, or ready to start. */
 function TaskState({ t }: { t: any }) {
   if (t.done) return <span className="state muted">{t.status}</span>;
-  if (t.working) return <span className="working">working</span>;
+  if (t.working) return <Working run={t.workingRun} />;
   if (t.blockedBy?.length) {
     return (
       <span className="state waiting">

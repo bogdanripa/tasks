@@ -382,3 +382,13 @@ export function StartsSoon({ at, itemRef, agent, onStarted }: { at: string; item
     </button>
   );
 }
+
+/** "working", linking to the run's live transcript when we know it. Doesn't trigger the card's own click. */
+export function Working({ run, label = 'working' }: { run?: string | null; label?: string }) {
+  if (!run) return <span className="working" title="An agent is working on this right now">{label}</span>;
+  return (
+    <Link to={`/runs/${run}`} className="working as-link" title="Watch what the agent is doing" onClick={(e) => e.stopPropagation()}>
+      {label}
+    </Link>
+  );
+}

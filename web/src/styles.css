@@ -480,3 +480,8 @@ code.inherited { margin-right: 6px; }
 .starting::before { content: ""; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--agent); box-sizing: border-box; }
 .starting.as-button { border: 1px dashed var(--agent); background: transparent; border-radius: 10px; padding: 1px 7px; cursor: pointer; color: var(--agent); }
 .starting.as-button:hover { background: var(--agent-soft); }
+.working.as-link { text-decoration: none; cursor: pointer; }
+.working.as-link:hover { text-decoration: underline; }
+.live-run { margin: 0 0 12px; padding: 8px 10px; border-radius: 6px; background: var(--agent-soft); }
+.assignee.as-link { text-decoration: none; color: inherit; border-radius: 10px; }
+.assignee.as-link:hover .assignee-name, .assignee.as-link:hover { text-decoration: underline; }

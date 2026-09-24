@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Item } from '../api';
 import { useSession } from '../App';
-import { Avatar, ErrorNote, SkillChip, StartsSoon, useFetch } from '../ui';
+import { Avatar, ErrorNote, SkillChip, StartsSoon, useFetch, Working } from '../ui';
 import { AssigneePicker, matchAssignee, useParamState, type Assignee, type Member } from '../filters';
 import { ItemTable } from './ItemTable';
 
@@ -205,12 +205,23 @@ function Card({ item, dragging, onDragStart, onDragEnd }: { item: Item; dragging
           </span>
         )}
         {!!item.linkCount && <span className="pill" title="Links">⇄ {item.linkCount}</span>}
-        {item.working && <span className="working" title="An agent is working on this right now">working</span>}
+        {item.working && <Working run={item.workingRun} />}
         {!item.working && item.startsAt && !item.blockedBy?.length && !item.done && <StartsSoon at={item.startsAt} itemRef={item.ref} agent={item.assigneeName} />}
         {item.skill && !item.assigneeName && !item.done && <SkillChip skill={item.skill} missing />}
         {!item.working && !!item.blockedBy?.length && !item.done && <span className="pill" title={`Waiting on ${item.blockedBy.join(', ')}`}>⏸ blocked</span>}
         <span className="spacer" />
-        {item.assigneeName ? (
+        {item.assigneeName && item.assigneeKind === 'agent' && item.assigneeId ? (
+          // An agent: open what it's doing (the live run) or has done (its activity).
+          <Link
+            to={item.workingRun ? `/runs/${item.workingRun}` : `/agents/${item.assigneeId}?tab=activity`}
+            className="assignee agent as-link"
+            title={item.workingRun ? `Watch ${item.assigneeName} work on this` : `${item.assigneeName}'s activity`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Avatar name={item.assigneeName} kind="agent" size={20} />
+            <span className="assignee-name">{item.assigneeName}</span>
+          </Link>
+        ) : item.assigneeName ? (
           <span className={`assignee ${item.assigneeKind ?? ''}`} title={`Assigned to ${item.assigneeName}`}>
             <Avatar name={item.assigneeName} kind={item.assigneeKind} size={20} />
             <span className="assignee-name">{item.assigneeName}</span>

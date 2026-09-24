@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { itemPath, type Item } from '../api';
-import { Avatar, SkillChip, StartsSoon, Time } from '../ui';
+import { Avatar, SkillChip, StartsSoon, Time, Working } from '../ui';
 
 type Row = Item & { updatedAt?: string; parentId?: string | null };
 type SortKey = 'status' | 'updated' | 'ref' | 'assignee';
@@ -85,14 +85,22 @@ export function ItemTable({ items, columns, flat }: { items: Row[]; columns: str
                 {nested && <span className="muted">↳ </span>}
                 {i.title}
                 {!nested && i.parentRef && <span className="muted small"> · {i.parentRef.split('/')[1]}</span>}
-                {i.working && <span className="working"> working</span>}
+                {i.working && <> <Working run={i.workingRun} /></>}
                 {!i.working && i.startsAt && !i.blockedBy?.length && !i.done && <> <StartsSoon at={i.startsAt} itemRef={i.ref} agent={i.assigneeName} /></>}
                 {!i.done && !!i.blockedBy?.length && <span className="pill" title={`Waiting on ${i.blockedBy.join(', ')}`}> ⏸ blocked</span>}
                 {!!i.tasksTotal && <span className="muted small"> ☑ {i.tasksDone}/{i.tasksTotal}</span>}
               </td>
               <td><span className="status-chip">{i.status}</span></td>
               <td>
-                {i.assigneeName ? (
+                {i.assigneeName && i.assigneeKind === 'agent' && i.assigneeId ? (
+                  <Link
+                    to={i.workingRun ? `/runs/${i.workingRun}` : `/agents/${i.assigneeId}?tab=activity`}
+                    className="assignee agent as-link"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Avatar name={i.assigneeName} kind="agent" size={18} /> {i.assigneeName}
+                  </Link>
+                ) : i.assigneeName ? (
                   <span className={`assignee ${i.assigneeKind ?? ''}`}>
                     <Avatar name={i.assigneeName} kind={i.assigneeKind} size={18} /> {i.assigneeName}
                   </span>

@@ -65,6 +65,8 @@ export type Item = {
   linkCount?: number;
   skill?: string | null;
   working?: boolean;
+  /** The run working on it right now (live transcript at /runs/<id>). */
+  workingRun?: string | null;
   /** When the assigned agent's next run on this item is due (an update waiting out the quiet period, or a busy agent). */
   startsAt?: string | null;
   blockedBy?: string[];
