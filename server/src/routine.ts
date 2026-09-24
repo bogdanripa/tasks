@@ -184,6 +184,7 @@ function buildPayload(p: {
   }
   const roster = [...bySkill].sort(([a], [b]) => (a.startsWith('(') ? 1 : b.startsWith('(') ? -1 : a.localeCompare(b)))
     .map(([sk, names]) => `- ${sk}: ${names.join(', ')}`).join('\n');
+  const humans = p.team.filter((m) => m.kind === 'human').map((m) => m.name);
   const guidelines = (title: string, text: string) =>
     text.trim() ? `\n${title}:\n${text.trim().slice(0, MAX_GUIDELINES)}${text.length > MAX_GUIDELINES ? '\n(truncated)' : ''}\n` : '';
   const json = `-H 'content-type: application/json'`;
@@ -219,6 +220,7 @@ ALL TASKS UNDER THIS ISSUE ARE DONE. This run is the definition-of-done check:
 - Anything missing or wrong: create a task for it (with a skill), comment what's missing, and end the run. You'll be woken when it's done.
 - Everything passes: deliver as the project guidelines say (pull request or merge), comment what shipped with the link, and move the issue to "${done}".` : ''}
 Do the work yourself when you can. Create tasks only to hand parts to others or to split work you'll do next (tasks you assign yourself wake you after this run). To hand work to others, create tasks under the issue with a "skill" and no assignee; Tasks gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
+When you need something from a human (a decision, an answer, access, credentials, a URL, money, or anything you can't or mustn't do yourself), don't guess and don't stop silently: create a task under the issue assigned to the human who filed it${humans.length ? ` (humans here: ${humans.join(', ')})` : ''}, saying exactly what you need and why; link it as blocking your task (${builtin ? 'link_items {"from":"<their task>","to":"' + item.ref + '","kind":"blocks"}' : `POST /api/links {"from":"<their task>","to":"${item.ref}","kind":"blocks"}`}); comment on your task what you're waiting for, and end your run. You're woken when they finish it.
 If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines.${builtin ? '' : ' Never put the API token in comments.'}
 
 Team, by skill:
