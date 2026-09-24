@@ -498,7 +498,8 @@ const llmServer = http.createServer((req, res) => {
       return say('Tested.');
     }
     // fake-worker: start, comment, finish
-    if (toolsSoFar === 0) return call('update_item', { ref, status: 'In progress' });
+    // Like OpenAI's strict tool schemas: every field sent, "" for the ones left alone.
+    if (toolsSoFar === 0) return call('update_item', { ref, status: 'In progress', title: '', body: '', assignee: '', skill: '' });
     if (toolsSoFar === 1) return call('comment', { ref, body: 'Built the Pong page. Live at https://example.com/pong' });
     if (toolsSoFar === 2) return call('update_item', { ref, status: 'Done' });
     return say('Done.');
@@ -521,6 +522,9 @@ for (let i = 0; i < 60 && !pongNow?.item.done; i++) { await new Promise((r) => s
 assert.equal(pongNow.item.status, 'Done', 'the in-house agent did the work');
 assert.equal(pongNow.comments.at(-1).authorName, `house-${run}`);
 const houseRun = (await api('GET', `/api/agents/${house.agent.id}`)).runs.find((r: any) => r.itemRef === pong.ref);
+const pongAfter = (await api('GET', `/api/items/${pong.ref}`)).item;
+assert.equal(pongAfter.assigneeName, house.agent.name, 'empty fields from the model change nothing');
+assert.ok(pongAfter.title.length > 0);
 assert.equal(houseRun.runtime, 'builtin');
 assert.ok(houseRun.finishedAt && !houseRun.error, 'finished cleanly');
 assert.ok(houseRun.inputTokens >= 300 && houseRun.steps >= 3, `tokens ${houseRun.inputTokens}, steps ${houseRun.steps}`);

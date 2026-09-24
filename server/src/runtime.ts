@@ -81,7 +81,7 @@ function browserTools(runId: string, shots: Shots): ToolSet {
     <A,>(fn: (a: A) => Promise<unknown>) =>
     async (a: A) => {
       try {
-        const out = JSON.stringify(await fn(a));
+        const out = JSON.stringify(await fn(Object.fromEntries(Object.entries((a ?? {}) as object).filter(([, v]) => v !== '')) as A));
         return out.length > MAX_TOOL_OUTPUT ? `${out.slice(0, MAX_TOOL_OUTPUT)}… (truncated)` : out;
       } catch (e) {
         return JSON.stringify({ error: (e as Error).message.split('\n')[0] });
@@ -168,11 +168,14 @@ function withScreenshots(messages: any[], shots: Shots) {
 export const TASK_TOOL_NAMES = ['get_item', 'update_item', 'comment', 'create_issue', 'create_task', 'link_items', 'list_items', 'search', 'list_members', 'set_project_value', 'delete_project_value', 'end_run'];
 
 function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string; shots: Shots } | null): ToolSet {
+  // Some providers (OpenAI's strict tool schemas) send every field, with "" for the ones the model means to
+  // leave alone. Empty strings mean "not given"; clearing a value takes an explicit word (see update_item).
+  const blankless = (a: any) => (a && typeof a === 'object' ? Object.fromEntries(Object.entries(a).filter(([, v]) => v !== '')) : a);
   const wrap =
     <A,>(fn: (a: A) => Promise<unknown>) =>
     async (a: A) => {
       try {
-        const out = JSON.stringify((await fn(a)) ?? { ok: true });
+        const out = JSON.stringify((await fn(blankless(a) as A)) ?? { ok: true });
         return out.length > MAX_TOOL_OUTPUT ? `${out.slice(0, MAX_TOOL_OUTPUT)}… (truncated)` : out;
       } catch (e) {
         if (e instanceof HttpError || e instanceof z.ZodError) return JSON.stringify({ error: e.message });
@@ -190,7 +193,7 @@ function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string;
       }),
     }),
     update_item: tool({
-      description: 'Change status (a board column), title, description (Markdown), assignee (member name; "" to unassign) or needed skill.',
+      description: 'Change status (a board column), title, description (Markdown), assignee (a member name, or "nobody" to unassign) or needed skill ("none" to clear). Leave out (or send "" for) what you don’t change.',
       inputSchema: z.object({
         ref,
         status: z.string().optional(),
@@ -200,7 +203,11 @@ function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string;
         skill: z.string().optional(),
       }),
       execute: wrap(async ({ ref, assignee, skill, ...rest }: any) => {
-        const item = await d.updateItem(actor, ref, { ...rest, assignee: assignee === '' ? null : assignee, skill: skill === '' ? null : skill });
+        const item = await d.updateItem(actor, ref, {
+          ...rest,
+          ...(assignee !== undefined ? { assignee: /^(nobody|none|unassigned)$/i.test(assignee) ? null : assignee } : {}),
+          ...(skill !== undefined ? { skill: /^none$/i.test(skill) ? null : skill } : {}),
+        });
         return { ref: item.ref, status: item.status, assignee: item.assigneeName, done: item.done };
       }),
     }),
@@ -231,7 +238,7 @@ function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string;
       }),
     }),
     create_task: tool({
-      description: 'Create a task under an issue. Give it a skill and no assignee to route it to the least busy member with that skill.',
+      description: 'Create a task under an issue. Give it a skill and no assignee to route it to the least busy member with that skill. To ask a human something, set assignee to their name. With neither, the task is yours.',
       inputSchema: z.object({ issue: ref, title: z.string(), body: z.string().optional(), status: z.string().optional(), assignee: z.string().optional(), skill: z.string().optional() }),
       execute: wrap(async (a: any) => {
         const parent = await d.resolveItem(actor, a.issue);
