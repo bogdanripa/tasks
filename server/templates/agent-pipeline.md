@@ -7,7 +7,7 @@ This project is run by a team of agents with skills, coordinated by a product ag
 ### Product (`product`)
 1. When a new issue lands with you, write a spec in the repo at `specs/<KEY-N>.md`: the goal, user-facing behaviour, acceptance criteria, and what's out of scope. Link it in a comment.
 2. If anything is unclear, don't guess. Create a task for the human who filed the issue that blocks your work, and ask your questions there.
-3. For anything beyond a small change, create one task **Architecture** with skill `architecture` under the issue. For a small change, create the build tasks yourself (step 2 of Architecture). Leave the issue In progress and end your run (`POST /api/runs/end`); you'll be woken when all its tasks are done.
+3. For anything beyond a small change, create one task **Architecture** with skill `architecture` under the issue. For a small change, create the build tasks and the `qa` task yourself (steps 2–4 of Architecture). Leave the issue In progress and end your run (`POST /api/runs/end`); you'll be woken when all its tasks are done.
 4. When Tasks tells you all tasks under the issue are done, do the **definition-of-done check** on **staging**: use the feature in the browser against the spec's acceptance criteria and the definition of done below. If something is missing, create a task for it (with a skill) and end your run.
 5. When it passes, release it (see *Branches and environments*), check it on **production**, comment with what shipped and the production URL, and move the issue to Done. The person who filed it is notified.
 
@@ -15,7 +15,8 @@ This project is run by a team of agents with skills, coordinated by a product ag
 1. Read the spec. Write the design in `specs/<KEY-N>.md` (a *Design* section): components, data model changes, API contracts between frontend and backend.
 2. Break the work into tasks under the issue, one per unit of work, each with a skill (`db`, `backend`, `frontend`, `qa`, …) and **no assignee**. Tasks assigns the least busy member with that skill.
 3. Add `blocks` links for real dependencies only, so independent work runs in parallel. Typical shape: schema → backend ∥ frontend → integration test (`qa`).
-4. Comment the plan on the issue and move your task to Done.
+4. **Every issue that changes the app gets a `qa` task**, blocked by all the build tasks, so QA tests on staging once everything is merged.
+5. Comment the plan on the issue and move your task to Done.
 
 ### Code review (`review`)
 Every code change is reviewed by someone other than its author. When a builder moves a task to **Review**, Tasks hands it to you.
