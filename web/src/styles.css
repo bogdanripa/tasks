@@ -445,3 +445,9 @@ code.inherited { margin-right: 6px; }
 .switch-row.on .switch::after { transform: translateX(14px); }
 .switch-row input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
 .connectors-own { margin-top: 12px; }
+.values li { gap: 12px; }
+.value-key { flex: none; font-weight: 600; }
+.value-text { cursor: text; min-width: 0; overflow-wrap: anywhere; }
+.value-edit { display: flex; gap: 6px; flex: 1; align-items: center; }
+.value-add { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; margin-top: 12px; }
+@media (max-width: 640px) { .value-add { grid-template-columns: 1fr; } }

@@ -136,6 +136,10 @@ export function describe(e: Event, showItem: boolean): ReactNode {
       return d.changes && 'repository' in d.changes
         ? (d.changes.repository ? <>linked the project to <b>{d.changes.repository}</b> on GitHub</> : <>unlinked the project’s GitHub repository</>)
         : <>updated the project settings</>;
+    case 'project.value_set':
+      return d.before === null ? <>set <code>{d.key}</code> to <span className="excerpt">{d.value}</span></> : <>changed <code>{d.key}</code> to <span className="excerpt">{d.value}</span></>;
+    case 'project.value_deleted':
+      return <>deleted the value <code>{d.key}</code></>;
     case 'github.connected':
       return <>connected GitHub (<b>{d.account}</b>)</>;
     case 'github.pull_request':

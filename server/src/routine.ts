@@ -9,6 +9,7 @@ import { BROWSER_TOOL_NAMES, inHouseFull, REPO_TOOL_NAMES, startInHouse, TASK_TO
 import { browserAvailable } from './browser.js';
 import { runRepo, type RunRepo } from './github.js';
 import { runConnectors } from './connectors.js';
+import { projectValues } from './projectValues.js';
 import { structuredPatch } from 'diff';
 
 const RUN_TOKEN_HOURS = 4;
@@ -158,6 +159,8 @@ function buildPayload(p: {
   /** routine: a Claude Code session using curl; builtin: Tasks runs the agent with tools. */
   mode: 'routine' | 'builtin';
   repo?: RunRepo | { error: string } | null;
+  /** The project's shared values (staging_url, …). */
+  values?: { key: string; value: string }[];
   /** MCP connectors the run has (builtin runs): their tools are prefixed name__. */
   connectors?: string[];
   working?: string;
@@ -228,7 +231,10 @@ If rules conflict: your role's hard limits win, then the project guidelines, the
 
 Team, by skill:
 ${roster}
-${guidelines(`Project guidelines (${project.name})`, project.guidelines)}${guidelines('Organization guidelines', p.orgGuidelines)}
+${guidelines(`Project guidelines (${project.name})`, project.guidelines)}
+Project values (shared notes for everyone on ${item.orgSlug}/${project.key}; save what others will need, like URLs of what you set up, with ${builtin ? 'set_project_value' : `PUT /api/projects/${item.orgSlug}/${project.key}/values/<key> {"value":"..."}`}; never secrets):
+${p.values?.length ? p.values.map((v) => `- ${v.key} = ${v.value.replace(/\n/g, ' ').slice(0, 300)}`).join('\n') : '(none yet)'}
+${guidelines('Organization guidelines', p.orgGuidelines)}
 Task: ${item.ref} (${item.type}) ${q(item.title)}
 Status: ${item.status}. Board columns: ${project.columns.join(' → ')} (the last one means done).${item.skill ? `\nNeeds skill: ${item.skill}` : ''}${p.parent ? `\nParent issue: ${p.parent.ref} ${q(p.parent.title)}` : ''}
 Link for humans: ${config.publicUrl}/app/i/${item.ref}
@@ -416,12 +422,14 @@ async function fireRoutine(rows: Pending[]) {
   // A token limited to the project's repository, for this run (none when the project has no repository).
   const repo = await runRepo(item.projectId).catch((e) => ({ error: (e as Error).message }));
   const reviewColumn = Object.keys(project.columnHandoffs ?? {})[0];
+  const projValues = [...(await projectValues(item.projectId))].map((v) => ({ key: v.key as string, value: v.value as string }));
   const mcpNames = first.runtimeProviderId ? (await runConnectors(item.orgId, item.projectId, first.agentId)).map((c) => c.name as string) : [];
   const build = (changeLines: string[]) =>
     buildPayload({
       mode: first.runtimeProviderId ? 'builtin' : 'routine',
       repo,
       connectors: mcpNames,
+      values: projValues,
       working: workingColumn(project.columns),
       // Offer Review only where it works: tasks, with someone other than this agent holding the skill.
       reviewColumn: reviewColumn && item.type === 'task' && team.some((m) => m.name !== first.agentName && m.skills.includes(project.columnHandoffs[reviewColumn])) ? reviewColumn : undefined,

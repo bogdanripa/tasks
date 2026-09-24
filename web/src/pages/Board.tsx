@@ -74,6 +74,7 @@ export default function Board() {
           ))}
         </div>
         <Link to={`/${org}/${key}/timeline`} className="button">Timeline</Link>
+        <Link to={`/${org}/${key}/values`} className="button">Values</Link>
         {admin && <Link to={`/${org}/${key}/settings`} className="button">Settings</Link>}
       </div>
       <ErrorNote error={opError} />

@@ -1,3 +1,4 @@
+import ValuesPage from './pages/Values';
 import { Toaster } from './toast';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/:org/:key/settings" element={<ProjectSettings />} />
           <Route path="/:org/:key" element={<Board />} />
           <Route path="/:org/:key/timeline" element={<Timeline />} />
+          <Route path="/:org/:key/values" element={<ValuesPage />} />
           <Route path="*" element={<div className="center muted">Not found</div>} />
         </Routes>
       </main>

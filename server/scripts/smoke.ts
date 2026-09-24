@@ -421,7 +421,7 @@ const llmServer = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'fake-mcp', 'text-embedding-3-small'].map((id) => ({ id })) });
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'fake-mcp', 'fake-values', 'text-embedding-3-small'].map((id) => ({ id })) });
     const b = JSON.parse(body);
     modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
     const userText = b.messages.find((m: any) => m.role === 'user')?.content;
@@ -455,6 +455,11 @@ const llmServer = http.createServer((req, res) => {
       ];
       if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
       return say('Shipped.');
+    }
+    if (b.model === 'fake-values') {
+      if (toolsSoFar === 0) return call('set_project_value', { project: ref?.replace(/-\d+$/, ''), key: 'production_url', value: 'https://pong.example.com' });
+      if (toolsSoFar === 1) return call('update_item', { ref, status: 'Done' });
+      return say('saved');
     }
     if (b.model === 'fake-mcp') {
       mcpToolsSeen.push((b.tools ?? []).map((t: any) => t.function.name));
@@ -787,6 +792,24 @@ await runFor(offItem.ref);
 assert.ok(!mcpToolsSeen[0].includes('ops__add') && mcpToolsSeen[0].includes('proj__echo') && mcpToolsSeen[0].includes('mine__echo'));
 mcpHttp.close();
 console.log('✓ MCP connectors: org + project (switched on per agent) + agent level, allowed tools only, header auth, secrets hidden, unavailable ones noted');
+
+// ---- Project values: shared notes anyone reads and writes; every run gets them ----
+await assert.rejects(api('PUT', `/api/projects/${org}/WEB/values/bad key`, { value: 'x' }), /Keys:/);
+await api('PUT', `/api/projects/${org}/WEB/values/staging_url`, { value: 'https://pong-dev.example.com' });
+await api('PUT', `/api/projects/${org}/WEB/values/staging_url`, { value: 'https://pong-staging.example.com' });
+await api('PUT', `/api/projects/${org}/WEB/values/scratch`, { value: 'temp' });
+await api('DELETE', `/api/projects/${org}/WEB/values/scratch`);
+assert.deepEqual((await api('GET', `/api/projects/${org}/WEB/values`)).map((v: any) => `${v.key}=${v.value}`), ['staging_url=https://pong-staging.example.com']);
+const valueEvents = (await api('GET', `/api/projects/${org}/WEB/timeline`)).filter((e: any) => e.type.startsWith('project.value'));
+assert.ok(valueEvents.length >= 4, 'value changes are in the timeline');
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-values' } });
+const valItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Record the production URL', status: 'Todo', assignee: house.agent.id });
+const valRun = await runFor(valItem.ref);
+assert.equal(valRun.error, null);
+const valPrompt = (await api('GET', `/api/runs/${valRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text;
+assert.match(valPrompt, /- staging_url = https:\/\/pong-staging\.example\.com/);
+assert.equal((await api('GET', `/api/projects/${org}/WEB/values`)).find((v: any) => v.key === 'production_url')?.value, 'https://pong.example.com', 'agents save values with a tool');
+console.log('✓ project values: anyone sets and deletes, timeline, every run sees them, agents save them');
 
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });

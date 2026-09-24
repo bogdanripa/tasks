@@ -12,6 +12,7 @@ import * as sched from './schedules.js';
 import * as llm from './llm.js';
 import * as github from './github.js';
 import * as connectors from './connectors.js';
+import * as values from './projectValues.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
@@ -132,6 +133,19 @@ export function apiRoutes(app: FastifyInstance) {
   });
 
   // ---- GitHub ----
+  // ---- project values ----
+  route(app, 'GET', '/api/projects/:org/:key/values', { section: 'Projects', summary: 'the project’s shared values (key/value notes like staging_url; any member)' }, async (req) =>
+    values.listValues(await requireActor(req), `${req.params.org}/${req.params.key}`),
+  );
+  route(app, 'PUT', '/api/projects/:org/:key/values/:name', {
+    section: 'Projects',
+    summary: 'set a project value (any member; everyone reads them, so no secrets)',
+    body: z.object({ value: z.string().min(1).max(2000) }),
+  }, async (req, { body }) => values.setValue(await requireActor(req), `${req.params.org}/${req.params.key}`, req.params.name, body.value));
+  route(app, 'DELETE', '/api/projects/:org/:key/values/:name', { section: 'Projects', summary: 'delete a project value (any member)' }, async (req) =>
+    values.deleteValue(await requireActor(req), `${req.params.org}/${req.params.key}`, req.params.name),
+  );
+
   // ---- MCP connectors (org, project and agent level) ----
   const connectorBody = z.object({
     name: z.string().min(2).max(31),

@@ -9,6 +9,7 @@ import { releaseRun } from './routine.js';
 import { repoOps, type RunRepo } from './github.js';
 import { browser_, browserAvailable, closeSession } from './browser.js';
 import { openConnectors } from './connectors.js';
+import * as values from './projectValues.js';
 
 /**
  * Agents that Tasks runs itself: an LLM with Tasks' own actions as tools, driven by the same payload
@@ -164,7 +165,7 @@ function withScreenshots(messages: any[], shots: Shots) {
 }
 
 /** The tools an in-house agent works with, acting as the agent (so the usual rules apply). */
-export const TASK_TOOL_NAMES = ['get_item', 'update_item', 'comment', 'create_issue', 'create_task', 'link_items', 'list_items', 'search', 'list_members', 'end_run'];
+export const TASK_TOOL_NAMES = ['get_item', 'update_item', 'comment', 'create_issue', 'create_task', 'link_items', 'list_items', 'search', 'list_members', 'set_project_value', 'delete_project_value', 'end_run'];
 
 function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string; shots: Shots } | null): ToolSet {
   const wrap =
@@ -265,6 +266,16 @@ function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string;
       execute: wrap(async ({ org }: any) =>
         (await d.orgDetail(actor, org)).members.map((m: any) => ({ name: m.name, kind: m.kind, skills: m.skills })),
       ),
+    }),
+    set_project_value: tool({
+      description: 'Save a shared project value (e.g. staging_url) that everyone on the project sees, in every run. Not for secrets.',
+      inputSchema: z.object({ project: z.string().describe('org/KEY'), key: z.string(), value: z.string() }),
+      execute: wrap(({ project, key, value }: any) => values.setValue(actor, project, key, value)),
+    }),
+    delete_project_value: tool({
+      description: 'Delete a shared project value.',
+      inputSchema: z.object({ project: z.string().describe('org/KEY'), key: z.string() }),
+      execute: wrap(({ project, key }: any) => values.deleteValue(actor, project, key)),
     }),
     end_run: tool({
       description: 'End this run without changing the task’s status (e.g. an issue now waiting on its tasks). Call it last.',

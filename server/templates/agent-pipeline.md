@@ -36,9 +36,11 @@ Every code change is reviewed by someone other than its author. When a builder m
 - For each failure, create a task with the right skill describing how to reproduce it (steps, what you expected, what happened, console errors), and make it block your task. Move your task to Done when everything passes, with a short test report as a comment.
 
 ### Branches and environments
-- The **development branch** is deployed to **staging** and the **production branch** to **production**, by the hosting platform, on every push. Both are named in the project's Repository settings (and in every assignment). If they're the same branch, there's no staging and no release step: test on production after the merge.
-  - Staging URL: *add it here*
-  - Production URL: *add it here*
+- The **development branch** is what runs on **staging**, the **production branch** what runs on **production**. If the hosting platform doesn't deploy them on every push, whoever merges deploys (with a hosting connector) or asks a human to. Both branches are named in the project's Repository settings (and in every assignment). If they're the same branch, there's no staging and no release step: test on production after the merge.
+  - Staging URL: the project value `staging_url`.
+  - Production URL: the project value `production_url`.
+- **Save what others will need as project values, as soon as you have it.** Whoever sets up an environment, or learns a URL (from a human or from the hosting platform), saves it right away (`staging_url`, `production_url`). The same goes for anything the next person would otherwise have to ask for: other environments, app ids on the hosting platform, where things live. Never secrets: everyone reads project values.
+- If a URL you need is missing, set that environment up if you have the access (e.g. a hosting connector), or ask a human. Then save it.
 - Every change reaches the development branch through a reviewed pull request from its task branch. Nobody commits to the development or production branch directly. (Specs and designs under `specs/` are the exception: commit them to the development branch.)
 - QA and the product check test on staging. Release only what passed there.
 - **Release:** after the product check passes, open a pull request from the development branch into the production branch and link it on the issue. *(Or, if this project releases without a human: merge it yourself.)* Then check the production URL.
