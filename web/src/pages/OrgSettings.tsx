@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
-import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, Tabs, useFetch, useTab } from '../ui';
+import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, SkillsEditor, Tabs, useFetch, useTab } from '../ui';
 import { AgentKeyReveal } from './Agent';
 import { FormModal } from './Org';
 
@@ -33,6 +33,11 @@ export default function OrgSettings() {
       alert((e as Error).message);
     }
   };
+  const setMember = async (m: any, patch: Record<string, unknown>) => {
+    await api('PATCH', `/api/orgs/${org}/members/${m.id}`, patch);
+    reload();
+  };
+  const skillsFor = (m: any) => <SkillsEditor value={m.skills} suggestions={data.skills} onSave={(skills) => setMember(m, { skills })} />;
   const update = async (patch: Record<string, string>) => {
     await api('PATCH', `/api/orgs/${org}`, patch);
     await Promise.all([reload(), refreshMe()]);
@@ -82,7 +87,16 @@ export default function OrgSettings() {
               <Avatar name={m.name} url={m.avatarUrl} />
               <span>{m.name}</span>
               <span className="muted small">{m.email}</span>
-              <span className="role">{m.role}</span>
+              {skillsFor(m)}
+              {o.role === 'owner' && m.id !== me.id ? (
+                <select className="role-select" value={m.role} onChange={(e) => setMember(m, { role: e.target.value }).catch((err) => alert(err.message))}>
+                  <option value="member">member</option>
+                  <option value="admin">admin</option>
+                  <option value="owner">owner</option>
+                </select>
+              ) : (
+                <span className="role">{m.role}</span>
+              )}
               {canRemove(m) && <button className="ghost small danger" onClick={() => remove(m)}>Remove</button>}
             </li>
           ))}
@@ -109,6 +123,10 @@ export default function OrgSettings() {
 
       {tab === 'agents' && (
       <section>
+        <p className="muted small">
+          Skills route work: an unassigned item that needs a skill (or sits in a column with a default skill) goes to the least busy member
+          who has it.
+        </p>
         <div className="section-head">
           <h2>Agents</h2>
           <button className="small" onClick={() => setModal('agent')}>New agent</button>
@@ -120,7 +138,7 @@ export default function OrgSettings() {
               <Avatar name={m.name} kind="agent" />
               <Link to={`/agents/${m.id}`}>{m.name}</Link>
               <span className="muted small">{m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'polls via MCP'}</span>
-              <KindBadge kind="agent" />
+              {skillsFor(m)}
             </li>
           ))}
         </ul>

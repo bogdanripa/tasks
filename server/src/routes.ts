@@ -12,6 +12,7 @@ import * as sched from './schedules.js';
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
 const assignee = z.string().nullable().optional().describe('member name, email or id; null to unassign');
+const skill = z.string().max(31).nullable().optional().describe('skill the work needs, e.g. "backend"; routes it to a member with that skill when unassigned');
 const webhook = z.string().url().nullable().optional().or(z.literal('').transform(() => null));
 
 export function apiRoutes(app: FastifyInstance) {
@@ -87,6 +88,14 @@ export function apiRoutes(app: FastifyInstance) {
     await d.cancelInvite(await requireActor(req), req.params.org, req.params.email);
     return { ok: true };
   });
+  route(app, 'PATCH', '/api/orgs/:org/members/:id', {
+    section: 'Organizations',
+    summary: 'set a member’s skills (admins) or role (owners); work waiting for those skills is routed',
+    body: z.object({
+      skills: z.array(z.string().max(31)).max(20).optional().describe('e.g. ["backend", "db"]'),
+      role: z.enum(['owner', 'admin', 'member']).optional(),
+    }),
+  }, async (req, { body }) => d.updateMember(await requireActor(req), req.params.org, req.params.id, body));
   route(app, 'DELETE', '/api/orgs/:org/members/:id', {
     section: 'Organizations',
     summary: 'remove a member or agent, or leave (your own id); their open items are unassigned',
@@ -190,7 +199,13 @@ export function apiRoutes(app: FastifyInstance) {
       description: z.string().max(2000).optional(),
       guidelines: z.string().max(20_000).optional().describe('Markdown; sent to agents with every run on this project'),
       columns: z
-        .array(z.object({ name: z.string().max(40), from: z.string().nullable().optional().describe('existing column this one was; omit for a new column') }))
+        .array(
+          z.object({
+            name: z.string().max(40),
+            from: z.string().nullable().optional().describe('existing column this one was; omit for a new column'),
+            skill: z.string().max(31).nullable().optional().describe('default skill: unassigned items here go to a member with it'),
+          }),
+        )
         .max(12)
         .optional()
         .describe('the full new list in order; the last means done; removed columns must be empty'),
@@ -260,6 +275,7 @@ export function apiRoutes(app: FastifyInstance) {
       assignee,
       status: z.string().optional().describe('a board column; defaults to the first'),
       triggeredBy: z.string().optional().describe('item that caused this one, in any project; the link is permanent'),
+      skill,
     }),
     agent: true,
   }, async (req, { body }) => {
@@ -283,6 +299,7 @@ export function apiRoutes(app: FastifyInstance) {
       status: z.string().optional().describe('a board column'),
       assignee,
       position: z.number().optional().describe('order within the column'),
+      skill,
     }),
     agent: true,
   }, async (req, { body }) => d.updateItem(await requireActor(req), req.params['*'], body));

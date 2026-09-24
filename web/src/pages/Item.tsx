@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Event } from '../api';
 import { useOrgName } from '../App';
-import { Avatar, EditableMarkdown, ErrorNote, EventRow, KindBadge, Markdown, Modal, RefLink, Time, TypeBadge, linkVerb, useFetch } from '../ui';
+import { Avatar, EditableMarkdown, ErrorNote, EventRow, KindBadge, Markdown, Modal, SkillChip, RefLink, Time, TypeBadge, linkVerb, useFetch } from '../ui';
 
 export default function ItemPage() {
   const { org, ref } = useParams();
@@ -101,8 +101,16 @@ export default function ItemPage() {
                     <span className={`check ${t.done ? 'on' : ''}`}>{t.done ? '✓' : ''}</span>
                     <RefLink refStr={t.ref} />
                     <span className="grow">{t.title}</span>
-                    <span className="status">{t.status}</span>
-                    <Avatar name={t.assigneeName} kind={t.assigneeKind} size={22} />
+                    <TaskState t={t} />
+                    {t.skill && <SkillChip skill={t.skill} missing={!t.assigneeName && !t.done} />}
+                    {t.assigneeName ? (
+                      <span className={`assignee ${t.assigneeKind ?? ''}`}>
+                        <Avatar name={t.assigneeName} kind={t.assigneeKind} size={20} />
+                        <span className="assignee-name">{t.assigneeName}</span>
+                      </span>
+                    ) : (
+                      <Avatar size={20} />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -180,6 +188,10 @@ export default function ItemPage() {
               <MemberOptions members={members} />
             </select>
           </label>
+          <SkillField value={item.skill ?? ''} suggestions={orgData.data?.skills ?? []} onSave={(skill) => patch({ skill: skill || null })} />
+          {!item.assigneeId && item.skill && !item.done && (
+            <p className="warn small">Nobody in this organization has the skill “{item.skill}”, so it’s waiting. Give it to someone in the organization’s settings.</p>
+          )}
           {item.assigneeKind === 'agent' && (
             <p className="muted small">
               {item.status.toLowerCase() === 'backlog' ? (
@@ -214,6 +226,41 @@ export default function ItemPage() {
       {modal === 'link' && <LinkModal fromRef={fullRef} onClose={() => setModal(null)} onDone={reload} />}
     </div>
   );
+}
+
+function SkillField({ value, suggestions, onSave }: { value: string; suggestions: string[]; onSave: (v: string) => Promise<unknown> }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => draft.trim() !== value && onSave(draft.trim());
+  return (
+    <label>
+      Needs skill
+      <input
+        list="item-skill-suggestions"
+        value={draft}
+        placeholder="none"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget.blur())}
+      />
+      <datalist id="item-skill-suggestions">{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
+      <span className="hint">When unassigned, it goes to the least busy member with this skill.</span>
+    </label>
+  );
+}
+
+/** Where a task stands in the plan: done, being worked on, waiting on blockers, or ready to start. */
+function TaskState({ t }: { t: any }) {
+  if (t.done) return <span className="state muted">{t.status}</span>;
+  if (t.working) return <span className="working">working</span>;
+  if (t.blockedBy?.length) {
+    return (
+      <span className="state waiting">
+        waiting on {t.blockedBy.map((r: string, n: number) => <span key={r}>{n > 0 && ', '}<RefLink refStr={r} /></span>)}
+      </span>
+    );
+  }
+  return <span className="state ready">{t.status === 'Backlog' ? 'in Backlog' : 'ready'}</span>;
 }
 
 function MemberOptions({ members }: { members: any[] }) {
@@ -267,6 +314,7 @@ function NewTaskModal(props: { parentRef: string; org: string; projectKey: strin
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [assignee, setAssignee] = useState('');
+  const [skill, setSkill] = useState('');
   const [error, setError] = useState<string | null>(null);
   return (
     <Modal title="New task" onClose={props.onClose}>
@@ -276,7 +324,7 @@ function NewTaskModal(props: { parentRef: string; org: string; projectKey: strin
           e.preventDefault();
           try {
             await api('POST', `/api/projects/${props.org}/${props.projectKey}/items`, {
-              type: 'task', parent: props.parentRef, title, body, assignee: assignee || null,
+              type: 'task', parent: props.parentRef, title, body, assignee: assignee || null, skill: skill.trim() || null,
             });
             props.onDone();
             props.onClose();
@@ -287,13 +335,19 @@ function NewTaskModal(props: { parentRef: string; org: string; projectKey: strin
       >
         <label>Title<input autoFocus required value={title} onChange={(e) => setTitle(e.target.value)} /></label>
         <label><span>Details<span className="muted"> (optional)</span></span><textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} /></label>
-        <label>
-          Assign to
-          <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-            <option value="">Unassigned</option>
-            <MemberOptions members={props.members} />
-          </select>
-        </label>
+        <div className="two-col" style={{ gap: 12 }}>
+          <label>
+            <span>Needs skill<span className="muted"> (optional)</span></span>
+            <input list="item-skill-suggestions" value={skill} placeholder="e.g. backend" onChange={(e) => setSkill(e.target.value)} />
+          </label>
+          <label>
+            Assign to
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">{skill.trim() ? 'By skill' : 'Unassigned'}</option>
+              <MemberOptions members={props.members} />
+            </select>
+          </label>
+        </div>
         <ErrorNote error={error} />
         <div className="actions">
           <button type="button" className="ghost" onClick={props.onClose}>Cancel</button>

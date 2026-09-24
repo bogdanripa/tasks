@@ -3,13 +3,14 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useOrgName, useSession } from '../App';
 import { EditableMarkdown, ErrorNote, Tabs, useFetch, useTab } from '../ui';
+import pipelineTemplate from '../templates/agent-pipeline.md?raw';
 import { FormModal } from './Org';
 import { NameField } from './OrgSettings';
 import { SchedulesSection } from './Schedules';
 
 const PROJECT_TABS = ['general', 'guidelines', 'board', 'recurring'] as const;
 
-type Column = { name: string; from: string | null; count: number };
+type Column = { name: string; from: string | null; count: number; skill: string };
 
 export default function ProjectSettings() {
   const { org, key } = useParams();
@@ -19,6 +20,7 @@ export default function ProjectSettings() {
   const { data, error, reload } = useFetch<{ project: any; items: any[] }>(`/api/projects/${org}/${key}`);
   const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useTab(PROJECT_TABS);
+  const orgSkills: string[] = useFetch<any>(`/api/orgs/${org}`).data?.skills ?? [];
 
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
@@ -65,12 +67,30 @@ export default function ProjectSettings() {
           editPlaceholder={'e.g.\n- Deploy from main only.\n- Move work to Review, not Done; a human closes it.\n- Link any follow-up as an issue triggered by the task.'}
           onSave={(guidelines) => update({ guidelines })}
         />
+        <div className="actions" style={{ marginTop: 8 }}>
+          <button
+            className="ghost small grow-left"
+            onClick={async () => {
+              if (project.guidelines && !confirm('Replace the current guidelines with the agent pipeline template?')) return;
+              await update({ guidelines: pipelineTemplate });
+            }}
+          >
+            Use the agent pipeline template
+          </button>
+        </div>
       </section>
       )}
 
       {tab === 'board' && (
       <section>
-        <ColumnsEditor key={project.columns.join('|')} columns={project.columns} items={items} onSave={(columns) => update({ columns })} />
+        <ColumnsEditor
+          key={project.columns.join('|') + JSON.stringify(project.columnSkills)}
+          columns={project.columns}
+          columnSkills={project.columnSkills ?? {}}
+          skills={orgSkills}
+          items={items}
+          onSave={(columns) => update({ columns })}
+        />
       </section>
       )}
 
@@ -108,12 +128,19 @@ export default function ProjectSettings() {
   );
 }
 
-function ColumnsEditor({ columns, items, onSave }: { columns: string[]; items: any[]; onSave: (c: { name: string; from: string | null }[]) => Promise<unknown> }) {
-  const initial = (): Column[] => columns.map((c) => ({ name: c, from: c, count: items.filter((i) => i.status === c).length }));
+function ColumnsEditor(props: {
+  columns: string[];
+  columnSkills: Record<string, string>;
+  skills: string[];
+  items: any[];
+  onSave: (c: { name: string; from: string | null; skill: string | null }[]) => Promise<unknown>;
+}) {
+  const { columns, columnSkills, items, onSave } = props;
+  const initial = (): Column[] => columns.map((c) => ({ name: c, from: c, count: items.filter((i) => i.status === c).length, skill: columnSkills[c] ?? '' }));
   const [rows, setRows] = useState<Column[]>(initial);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const dirty = JSON.stringify(rows.map((r) => [r.name, r.from])) !== JSON.stringify(columns.map((c) => [c, c]));
+  const dirty = JSON.stringify(rows.map((r) => [r.name, r.from, r.skill.trim()])) !== JSON.stringify(columns.map((c) => [c, c, columnSkills[c] ?? '']));
   const set = (i: number, patch: Partial<Column>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const move = (i: number, d: number) => {
     const next = [...rows];
@@ -125,13 +152,23 @@ function ColumnsEditor({ columns, items, onSave }: { columns: string[]; items: a
     <div className="stack">
       <p className="muted small">
         Left to right. The <b>last column means done</b>; a column named “In progress” (or Doing, WIP, Working) is where agents put work they’ve
-        started, and items in “Backlog” don’t ping agents. Renaming a column keeps its items in it. A column must be empty before you remove it.
+        started, and items in “Backlog” don’t ping agents. A <b>default skill</b> sends unassigned items in that column to the least busy member with it
+        (e.g. Todo → product). Renaming a column keeps its items in it. A column must be empty before you remove it.
       </p>
       <ol className="columns-editor">
         {rows.map((r, i) => (
           <li key={i}>
             <span className="muted small idx">{i + 1}</span>
             <input value={r.name} maxLength={40} onChange={(e) => set(i, { name: e.target.value })} aria-label={`Column ${i + 1} name`} />
+            <input
+              className="col-skill"
+              list="column-skill-suggestions"
+              value={r.skill}
+              placeholder="default skill"
+              title="Unassigned items in this column go to a member with this skill"
+              onChange={(e) => set(i, { skill: e.target.value })}
+              aria-label={`Column ${i + 1} default skill`}
+            />
             <span className="muted small col-meta">
               {r.from === null ? 'new' : `${r.count} item${r.count === 1 ? '' : 's'}`}
               {r.from && r.from !== r.name.trim() && ` · was ${r.from}`}
@@ -150,9 +187,10 @@ function ColumnsEditor({ columns, items, onSave }: { columns: string[]; items: a
           </li>
         ))}
       </ol>
+      <datalist id="column-skill-suggestions">{props.skills.map((s) => <option key={s} value={s} />)}</datalist>
       <ErrorNote error={error} />
       <div className="actions">
-        <button className="ghost small grow-left" onClick={() => setRows([...rows, { name: '', from: null, count: 0 }])} disabled={rows.length >= 12}>
+        <button className="ghost small grow-left" onClick={() => setRows([...rows, { name: '', from: null, count: 0, skill: '' }])} disabled={rows.length >= 12}>
           + Add column
         </button>
         {dirty && <button className="ghost small" onClick={() => { setRows(initial()); setError(null); }}>Reset</button>}
@@ -161,7 +199,7 @@ function ColumnsEditor({ columns, items, onSave }: { columns: string[]; items: a
           disabled={!dirty}
           onClick={async () => {
             try {
-              await onSave(rows.map((r) => ({ name: r.name.trim(), from: r.from })));
+              await onSave(rows.map((r) => ({ name: r.name.trim(), from: r.from, skill: r.skill.trim() || null })));
               setError(null);
               setSaved(true);
               setTimeout(() => setSaved(false), 1500);

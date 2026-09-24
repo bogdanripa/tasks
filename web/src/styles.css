@@ -299,6 +299,7 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .columns-editor { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .columns-editor li { display: flex; align-items: center; gap: 8px; }
 .columns-editor input { max-width: 260px; }
+.columns-editor input.col-skill { max-width: 140px; font-size: 12px; }
 .columns-editor .idx { width: 16px; text-align: right; }
 .columns-editor .col-meta { flex: 1; }
 .columns-editor button.icon:disabled { opacity: 0.25; }
@@ -315,6 +316,20 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .tabs button { border: none; background: none; border-radius: 0; padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tabs button:hover { background: none; color: var(--text); }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+.skill { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.skill.missing { background: color-mix(in srgb, var(--issue) 16%, transparent); color: var(--issue); }
+.skills { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.skills-edit { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+.skills-edit input { width: 200px; padding: 4px 8px; }
+.people .role { margin-left: 0; }
+.role-select { width: auto; padding: 3px 6px; font-size: 12px; }
+.working { font-size: 11px; color: var(--agent); display: inline-flex; align-items: center; gap: 4px; }
+.working::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--agent); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+.state { font-size: 11px; white-space: nowrap; }
+.state.ready { color: var(--accent); }
+.state.waiting { color: var(--muted); }
 
 /* modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }

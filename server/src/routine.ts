@@ -113,6 +113,7 @@ function buildPayload(p: {
   item: Record<string, any>;
   project: Record<string, any>;
   orgGuidelines: string;
+  team: { name: string; kind: string; skills: string[] }[];
   parent?: Record<string, any>;
   changes: string[];
   token: string;
@@ -121,6 +122,13 @@ function buildPayload(p: {
   const { item, project } = p;
   const done = project.columns[project.columns.length - 1];
   const auth = `-H "Authorization: Bearer $TASKS_TOKEN"`;
+  const bySkill = new Map<string, string[]>();
+  for (const m of p.team) {
+    const label = `${m.name}${m.name === p.agentName ? ' (you)' : m.kind === 'human' ? ' (human)' : ''}`;
+    for (const sk of m.skills.length ? m.skills : ['(no skills)']) bySkill.set(sk, [...(bySkill.get(sk) ?? []), label]);
+  }
+  const roster = [...bySkill].sort(([a], [b]) => (a.startsWith('(') ? 1 : b.startsWith('(') ? -1 : a.localeCompare(b)))
+    .map(([sk, names]) => `- ${sk}: ${names.join(', ')}`).join('\n');
   const guidelines = (title: string, text: string) =>
     text.trim() ? `\n${title}:\n${text.trim().slice(0, MAX_GUIDELINES)}${text.length > MAX_GUIDELINES ? '\n(truncated)' : ''}\n` : '';
   return `Tasks run for agent "${p.agentName}".
@@ -131,10 +139,14 @@ How to work (from Tasks):
 3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
 4. Comment with what you did, then set its status: "${done}" when finished, or another column (e.g. for review). Any status other than "${p.working ?? '-'}" ends your run.
 5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.
+To hand work to others, create tasks under the issue with a "skill" and no assignee; Tasks gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
 If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines. Never put the API token in comments.
+
+Team, by skill:
+${roster}
 ${guidelines(`Project guidelines (${project.name})`, project.guidelines)}${guidelines('Organization guidelines', p.orgGuidelines)}
 Task: ${item.ref} (${item.type}) ${q(item.title)}
-Status: ${item.status}. Board columns: ${project.columns.join(' → ')} (the last one means done).${p.parent ? `\nParent issue: ${p.parent.ref} ${q(p.parent.title)}` : ''}
+Status: ${item.status}. Board columns: ${project.columns.join(' → ')} (the last one means done).${item.skill ? `\nNeeds skill: ${item.skill}` : ''}${p.parent ? `\nParent issue: ${p.parent.ref} ${q(p.parent.title)}` : ''}
 Link for humans: ${config.publicUrl}/i/${item.ref}
 
 What changed since the last run:
@@ -262,6 +274,9 @@ async function fireRoutine(rows: Pending[]) {
   const text = buildPayload({
     working: workingColumn(project.columns),
     orgGuidelines: project.orgGuidelines,
+    team: [...(await sql`
+      select a.name, a.kind, m.skills from memberships m join accounts a on a.id = m.account_id
+      where m.org_id = ${item.orgId} and a.deactivated_at is null order by a.kind desc, a.name`)] as any,
     agentName: first.agentName, item, project, parent, token: key.key, expiresAt,
     changes: [...new Set(changes.map(describeChange))],
   });

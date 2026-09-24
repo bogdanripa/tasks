@@ -45,6 +45,9 @@ export type Item = {
   tasksTotal?: number;
   tasksDone?: number;
   linkCount?: number;
+  skill?: string | null;
+  working?: boolean;
+  blockedBy?: string[];
 };
 
 export type Event = {

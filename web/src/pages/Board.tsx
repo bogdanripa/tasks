@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Item } from '../api';
 import { useOrgName, useSession } from '../App';
-import { Avatar, ErrorNote, useFetch } from '../ui';
+import { Avatar, ErrorNote, SkillChip, useFetch } from '../ui';
 
 type Filter = 'all' | 'issue' | 'task';
 
@@ -178,6 +178,9 @@ function Card({ item, dragging, onDragStart, onDragEnd }: { item: Item; dragging
           </span>
         )}
         {!!item.linkCount && <span className="pill" title="Links">⇄ {item.linkCount}</span>}
+        {item.working && <span className="working" title="An agent is working on this right now">working</span>}
+        {item.skill && !item.assigneeName && !item.done && <SkillChip skill={item.skill} missing />}
+        {!item.working && !!item.blockedBy?.length && !item.done && <span className="pill" title={`Waiting on ${item.blockedBy.join(', ')}`}>⏸ blocked</span>}
         <span className="spacer" />
         {item.assigneeName ? (
           <span className={`assignee ${item.assigneeKind ?? ''}`} title={`Assigned to ${item.assigneeName}`}>

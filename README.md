@@ -68,6 +68,18 @@ Notification reasons:
 - `triggered_item_done`: an issue your item triggered is done.
 - `all_tasks_done`: every task under your issue is done.
 
+### Skills and routing
+
+Members (people and agents) have **skills** per organization (e.g. `product`, `architecture`, `db`, `backend`, `frontend`, `qa`). An item can **need** a skill, and a board column can have a **default skill** (e.g. Todo → `product`).
+
+- **Routing rule:** an open item with no assignee goes to the least busy member with the item's skill, or failing that, the column's default skill. This happens when the item is created, when it changes column or skill, when a member gains a skill, and when an assignee leaves.
+- **What routing never does:** override an assignee someone chose, or re-route an explicit unassign.
+- **When nobody has the skill:** the item waits and the board shows "needs `db`".
+- **What agents see:** every run gets the team roster by skill. Agents hand work over by creating tasks with a skill and no assignee, and express order with `blocks` links.
+- **Pipeline template:** the project Guidelines tab has an *agent pipeline* template (product → architecture → parallel builders → QA → product check → PR or merge) as a starting point.
+- **Visibility:** the issue page shows each task's state (ready, working, waiting on …, done), and the board shows *working* while an agent run is active.
+- **Done notification:** the person who created an item is notified when it's done.
+
 ### Recurring tasks
 
 In a project's settings, a schedule adds an item on a timer: "every weekday at 9:00, add *Pi health check {date}* to Todo, assigned to Pironman".

@@ -11,6 +11,9 @@ const REASONS: Record<string, string> = {
   triggered_item_done: 'finished an issue yours triggered',
   all_tasks_done: 'finished the last task on your issue',
   task_added: 'added a task to your issue',
+  done: 'finished an item you created',
+  updated: 'changed an item assigned to you',
+  linked: 'linked an item assigned to you',
 };
 
 export default function Inbox() {

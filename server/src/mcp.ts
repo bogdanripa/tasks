@@ -15,6 +15,7 @@ const INSTRUCTIONS = `Tasks: a tracker shared by humans and agents.
 - Move your work across the project's columns with update_item(status). The last column means done.
 - When your work reveals a need elsewhere (any project, even another org you belong to), create_issue with triggered_by set to the item you are working on, so the chain stays traceable.
 - get_item returns the project's and organization's guidelines (project.guidelines, project.orgGuidelines): follow them. Your own hard limits win over project guidelines, which win over organization guidelines.
+- Hand work over by skill, not by name: create tasks with skill (e.g. "backend") and no assignee; Tasks assigns the least busy member with that skill. list_members shows everyone's skills. Use blocks links for dependencies; blocked tasks don't wake their agents.
 - Move an item to the in-progress column when you start on it. Leave a comment summarizing what you did before marking it done.`;
 
 const text = (value: unknown) => ({
@@ -50,7 +51,7 @@ function buildServer(actor: Actor) {
   tool('list_projects', 'Projects you can access, with their board columns.', {}, () => d.listProjects(actor));
 
   tool('list_members', 'Humans and agents in an organization, e.g. to find someone to assign.', { org: z.string() }, async ({ org }) =>
-    (await d.orgDetail(actor, org)).members.map((m: any) => ({ id: m.id, name: m.name, kind: m.kind, email: m.email, role: m.role })),
+    (await d.orgDetail(actor, org)).members.map((m: any) => ({ id: m.id, name: m.name, kind: m.kind, email: m.email, role: m.role, skills: m.skills })),
   );
 
   tool(
@@ -108,26 +109,27 @@ function buildServer(actor: Actor) {
       triggered_by: z.string().optional().describe('Ref of the item that triggered this issue'),
       assignee: z.string().optional().describe('Member id, email or name'),
       status: z.string().optional(),
+      skill: z.string().optional().describe('Skill the work needs; unassigned, it goes to a member with it'),
     },
-    async (a) => d.createItem(actor, await d.resolveProject(actor, a.project), { type: 'issue', title: a.title, body: a.body, triggeredBy: a.triggered_by, assignee: a.assignee, status: a.status }),
+    async (a) => d.createItem(actor, await d.resolveProject(actor, a.project), { type: 'issue', title: a.title, body: a.body, triggeredBy: a.triggered_by, assignee: a.assignee, status: a.status, skill: a.skill }),
   );
 
   tool(
     'create_task',
     'Create a task under an issue. Assigning it to an agent pings that agent.',
-    { issue: z.string().describe('Ref of the parent issue'), title: z.string(), body: z.string().optional(), assignee: z.string().optional(), status: z.string().optional() },
+    { issue: z.string().describe('Ref of the parent issue'), title: z.string(), body: z.string().optional(), assignee: z.string().optional(), status: z.string().optional(), skill: z.string().optional().describe('Skill the work needs, e.g. "backend"; leave assignee empty to route it') },
     async (a) => {
       const parent = await d.resolveItem(actor, a.issue);
       const project = await d.resolveProject(actor, parent.projectId);
-      return d.createItem(actor, project, { type: 'task', parentRef: parent.id, title: a.title, body: a.body, assignee: a.assignee, status: a.status });
+      return d.createItem(actor, project, { type: 'task', parentRef: parent.id, title: a.title, body: a.body, assignee: a.assignee, status: a.status, skill: a.skill });
     },
   );
 
   tool(
     'update_item',
     'Change title, description, status (board column) or assignee. Use assignee "" to unassign.',
-    { ref: z.string(), title: z.string().optional(), body: z.string().optional(), status: z.string().optional(), assignee: z.string().optional() },
-    ({ ref, assignee, ...rest }) => d.updateItem(actor, ref, { ...rest, assignee: assignee === '' ? null : assignee }),
+    { ref: z.string(), title: z.string().optional(), body: z.string().optional(), status: z.string().optional(), assignee: z.string().optional(), skill: z.string().optional().describe('"" to clear') },
+    ({ ref, assignee, skill, ...rest }) => d.updateItem(actor, ref, { ...rest, assignee: assignee === '' ? null : assignee, skill: skill === '' ? null : skill }),
   );
 
   tool('comment', 'Comment on an item.', { ref: z.string(), body: z.string() }, ({ ref, body }) => d.addComment(actor, ref, body));

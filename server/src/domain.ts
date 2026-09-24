@@ -122,7 +122,7 @@ async function notify(tx: Db, accountId: string | null | undefined, eventId: num
            case when a.routine_url is not null or a.webhook_url is not null then now() + ${quiet}::interval end
     from accounts a
     where a.id = ${accountId}
-      and not exists (select 1 from notifications n where n.account_id = a.id and n.event_id = ${eventId})
+      and not exists (select 1 from notifications n where n.account_id = a.id and n.event_id = ${eventId} and n.item_id is not distinct from ${itemId})
     returning delivery_status`;
   // Quiet period restarts on every change: pushes for this item wait until nobody has touched it for a while.
   if (row?.deliveryStatus === 'pending' && itemId) {
@@ -130,6 +130,86 @@ async function notify(tx: Db, accountId: string | null | undefined, eventId: num
       update notifications set next_attempt_at = greatest(next_attempt_at, now() + ${quiet}::interval)
       where account_id = ${accountId} and item_id = ${itemId} and delivery_status = 'pending'`;
   }
+}
+
+// ---------- skills & routing ----------
+
+const SKILL = /^[a-z0-9][a-z0-9-]{0,30}$/;
+/** Skills are short lowercase tags: "Backend Dev" → "backend-dev". */
+export function normalizeSkill(raw: string) {
+  const s = raw.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (!SKILL.test(s)) throw badRequest(`"${raw}" isn't a valid skill (letters, digits and dashes)`);
+  return s;
+}
+export const SUGGESTED_SKILLS = ['product', 'architecture', 'db', 'backend', 'frontend', 'qa', 'design', 'devops'];
+
+/** The org member with this skill who has the fewest open items (ties: longest-standing member). */
+async function pickBySkill(tx: Db, orgId: string, skill: string) {
+  const [m] = await tx`
+    select a.id, a.name from memberships m join accounts a on a.id = m.account_id
+    where m.org_id = ${orgId} and ${skill} = any(m.skills) and a.deactivated_at is null
+    order by (select count(*) from items i join projects p on p.id = i.project_id
+              where p.org_id = ${orgId} and i.assignee_id = a.id and i.closed_at is null), m.created_at
+    limit 1`;
+  return m ?? null;
+}
+
+/**
+ * If an open item has no assignee, give it to someone: by the skill it needs, else by its column's
+ * default skill. Never overrides an assignee someone chose.
+ */
+async function routeItem(tx: Db, actor: Actor, itemId: string) {
+  const [item] = await tx`
+    select v.*, p.column_skills from item_view v join projects p on p.id = v.project_id where v.id = ${itemId}`;
+  if (!item || item.assigneeId || item.closedAt) return;
+  const skill: string | undefined = item.skill ?? item.columnSkills?.[item.status];
+  if (!skill) return;
+  const member = await pickBySkill(tx, item.orgId, skill);
+  if (!member) return; // stays unassigned; the board shows "needs <skill>"
+  await tx`update items set assignee_id = ${member.id}, updated_at = now() where id = ${itemId} and assignee_id is null`;
+  const ev = await emit(tx, {
+    orgId: item.orgId, projectId: item.projectId, itemId, actorId: actor.id, type: 'item.updated',
+    data: { ref: item.ref, title: item.title, changes: { assignee: [null, member.name] }, routedBy: skill },
+  });
+  await notify(tx, member.id, ev, itemId, 'assigned', actor);
+}
+
+/** Route every open, unassigned item in an org (or one project) that some skill could now place. */
+async function routeUnassigned(tx: Db, actor: Actor, where: { orgId?: string; projectId?: string }) {
+  const items = await tx`
+    select i.id from items i join projects p on p.id = i.project_id
+    where i.assignee_id is null and i.closed_at is null
+      and (i.skill is not null or p.column_skills ? i.status)
+      ${where.orgId ? tx`and p.org_id = ${where.orgId}` : tx``}
+      ${where.projectId ? tx`and p.id = ${where.projectId}` : tx``}
+    order by i.created_at`;
+  for (const i of items) await routeItem(tx, actor, i.id);
+}
+
+/** Admins set a member's skills (and owners their role); newly placeable work is routed right away. */
+export async function updateMember(actor: Actor, slug: string, accountId: string, patch: { skills?: string[]; role?: Role }) {
+  const org = await resolveOrg(actor, slug, true);
+  const [target] = await sql`select role from memberships where org_id = ${org.id} and account_id = ${accountId}`;
+  if (!target) throw notFound('Member');
+  if (patch.role && patch.role !== target.role) {
+    if (org.role !== 'owner') throw forbidden('Only an owner can change roles');
+    const [acc] = await sql`select kind from accounts where id = ${accountId}`;
+    if (acc.kind === 'agent' && patch.role !== 'member') throw badRequest('Agents are always members');
+  }
+  const skills = patch.skills ? [...new Set(patch.skills.map(normalizeSkill))] : undefined;
+  return mutate(async (tx) => {
+    if (patch.role && target.role === 'owner' && patch.role !== 'owner') {
+      const [{ n }] = await tx`select count(*)::int as n from memberships where org_id = ${org.id} and role = 'owner'`;
+      if (n <= 1) throw badRequest('An organization needs at least one owner');
+    }
+    const [m] = await tx`
+      update memberships set
+        skills = ${skills ? tx`${skills}` : tx`skills`},
+        role = ${patch.role ?? target.role}
+      where org_id = ${org.id} and account_id = ${accountId} returning skills, role`;
+    if (skills) await routeUnassigned(tx, actor, { orgId: org.id });
+    return m;
+  });
 }
 
 // ---------- orgs, members, agents, projects ----------
@@ -162,14 +242,15 @@ export async function orgDetail(actor: Actor, slug: string) {
       from projects p left join items i on i.project_id = p.id
       where p.org_id = ${org.id} group by p.id order by p.key`,
     sql`
-      select a.id, a.kind, a.name, a.email, a.avatar_url, m.role,
+      select a.id, a.kind, a.name, a.email, a.avatar_url, m.role, m.skills,
              case when a.routine_url is not null then 'routine' when a.webhook_url is not null then 'webhook' else 'poll' end as delivery,
              case when ${org.role !== 'member'} then a.webhook_url end as webhook_url
       from memberships m join accounts a on a.id = m.account_id
       where m.org_id = ${org.id} order by a.kind desc, a.name`,
     org.role === 'member' ? [] : sql`select email, role, created_at from invites where org_id = ${org.id} order by created_at`,
   ]);
-  return { org, projects, members, invites };
+  const skills = [...new Set([...SUGGESTED_SKILLS, ...members.flatMap((m: Row) => m.skills)])].sort();
+  return { org, projects, members, invites, skills };
 }
 
 /**
@@ -190,6 +271,7 @@ export async function deleteOrg(actor: Actor, slug: string, confirm: string) {
 }
 
 /** Unassign everything open that `accountId` holds in the org, recording it in each item's history. */
+/** Call after the member lost their membership, so routing doesn't hand the work straight back. */
 async function unassignAll(tx: Db, actor: Actor, orgId: string, accountId: string, name: string) {
   const items = await tx`
     update items i set assignee_id = null, updated_at = now()
@@ -202,13 +284,14 @@ async function unassignAll(tx: Db, actor: Actor, orgId: string, accountId: strin
       orgId, projectId: i.projectId, itemId: i.id, actorId: actor.id, type: 'item.updated',
       data: { ref: `${org.slug}/${i.key}-${i.number}`, title: i.title, changes: { assignee: [name, null] } },
     });
+    await routeItem(tx, actor, i.id); // someone else with the skill picks it up
   }
   return items.length;
 }
 
 async function deactivateAgent(tx: Db, actor: Actor, agent: Row) {
-  const unassigned = await unassignAll(tx, actor, agent.orgId, agent.id, agent.name);
   await tx`delete from memberships where account_id = ${agent.id}`;
+  const unassigned = await unassignAll(tx, actor, agent.orgId, agent.id, agent.name);
   await tx`update api_keys set revoked_at = now() where account_id = ${agent.id} and revoked_at is null`;
   await tx`
     update accounts set deactivated_at = now(), webhook_url = null, routine_url = null, routine_token_enc = null
@@ -244,8 +327,8 @@ export async function removeMember(actor: Actor, slug: string, accountId: string
       if (n <= 1) throw badRequest('An organization needs at least one owner. Make someone else an owner first, or delete the organization.');
     }
     if (target.kind === 'agent') return deactivateAgent(tx, actor, target);
-    const unassigned = await unassignAll(tx, actor, org.id, target.id, target.name);
     await tx`delete from memberships where org_id = ${org.id} and account_id = ${target.id}`;
+    const unassigned = await unassignAll(tx, actor, org.id, target.id, target.name);
     await emit(tx, { orgId: org.id, actorId: actor.id, type: self ? 'member.left' : 'member.removed', data: { accountId: target.id, name: target.name, unassigned } });
     return { unassigned };
   });
@@ -374,7 +457,7 @@ export async function updateOrg(actor: Actor, slug: string, patch: { name?: stri
   });
 }
 
-type ColumnEdit = { name: string; from?: string | null };
+type ColumnEdit = { name: string; from?: string | null; skill?: string | null };
 
 /**
  * Admin edits to a project. Columns come as the full new list; `from` names the existing column a row
@@ -390,12 +473,14 @@ export async function updateProject(
   if ((await orgRole(actor.id, project.orgId)) === 'member') throw forbidden('Requires an org admin');
   const old: string[] = project.columns;
   let columns: string[] | undefined;
+  let columnSkills: Record<string, string> | undefined;
   const renames: [string, string][] = [];
   if (patch.columns) {
     columns = patch.columns.map((c) => c.name.trim());
     if (columns.length < 2) throw badRequest('A project needs at least two columns');
     if (columns.some((c) => !c)) throw badRequest('Column names can’t be empty');
     if (new Set(columns.map((c) => c.toLowerCase())).size !== columns.length) throw badRequest('Column names must be unique');
+    columnSkills = Object.fromEntries(patch.columns.filter((c) => c.skill).map((c) => [c.name.trim(), normalizeSkill(c.skill!)]));
     const kept = new Set(patch.columns.map((c) => c.from).filter(Boolean) as string[]);
     for (const c of patch.columns) {
       if (c.from && !old.includes(c.from)) throw badRequest(`Unknown column "${c.from}"`);
@@ -425,13 +510,16 @@ export async function updateProject(
         name = coalesce(${patch.name?.trim() || null}, name),
         description = coalesce(${patch.description ?? null}, description),
         guidelines = coalesce(${patch.guidelines ?? null}, guidelines),
-        columns = ${columns ? tx`${columns}` : tx`columns`}
+        columns = ${columns ? tx`${columns}` : tx`columns`},
+        column_skills = ${columnSkills ? tx.json(columnSkills) : tx`column_skills`}
       where id = ${project.id} returning *`;
     const changes: Record<string, unknown> = {};
     if (patch.name !== undefined && patch.name.trim() !== project.name) changes.name = [project.name, patch.name.trim()];
     if (patch.description !== undefined && patch.description !== project.description) changes.description = true;
     if (patch.guidelines !== undefined && patch.guidelines !== project.guidelines) changes.guidelines = true;
     if (columns && columns.join('\n') !== old.join('\n')) changes.columns = [old, columns];
+    if (columnSkills && JSON.stringify(columnSkills) !== JSON.stringify(project.columnSkills ?? {})) changes.columnSkills = columnSkills;
+    if (columnSkills) await routeUnassigned(tx, actor, { projectId: project.id }); // new defaults may place waiting items
     if (Object.keys(changes).length) {
       await emit(tx, { orgId: project.orgId, projectId: project.id, actorId: actor.id, type: 'project.updated', data: { changes } });
     }
@@ -486,12 +574,23 @@ export async function listProjects(actor: Actor) {
 
 const doneColumn = (p: Row) => p.columns[p.columns.length - 1] as string;
 
+/** True while an agent run on the item is active (fired, not finished, token used recently). */
+const workingSql = (itemId: ReturnType<typeof sql>) => sql`exists (
+  select 1 from agent_runs r left join api_keys k on k.id = r.key_id
+  where r.item_id = ${itemId} and r.status = 'fired' and r.finished_at is null
+    and coalesce(k.last_used_at, r.created_at) > now() - interval '20 minutes')`;
+/** Refs of the open items blocking this one. */
+const blockersSql = (itemId: ReturnType<typeof sql>) => sql`array(
+  select b.ref from links l join item_view b on b.id = l.from_id
+  where l.to_id = ${itemId} and l.kind = 'blocks' and l.removed_at is null and b.closed_at is null order by b.number)`;
+
 /** The board's "work is happening" column, if it has one ("In progress", "Doing", "WIP", "Working"). */
 export const workingColumn = (columns: string[]) => columns.find((c) => /^(in[ -]?progress|doing|wip|working)$/i.test(c.trim()));
 
 export async function listItems(project: Row, f: { status?: string; type?: ItemType; assigneeId?: string; open?: boolean } = {}) {
   return sql`
-    select v.id, v.ref, v.number, v.type, v.title, v.status, v.position, v.assignee_id, v.assignee_name, v.assignee_kind,
+    select v.id, v.ref, v.number, v.type, v.title, v.status, v.position, v.assignee_id, v.assignee_name, v.assignee_kind, v.skill,
+           ${workingSql(sql`v.id`)} as working, ${blockersSql(sql`v.id`)} as blocked_by,
            v.parent_id, par.ref as parent_ref, v.done, v.created_at, v.updated_at,
            (select count(*)::int from items c where c.parent_id = v.id) as tasks_total,
            (select count(*)::int from items c where c.parent_id = v.id and c.closed_at is not null) as tasks_done,
@@ -524,6 +623,7 @@ export type CreateItemInput = {
   assignee?: string | null;
   status?: string;
   triggeredBy?: string;
+  skill?: string | null;
   /** Set when a recurring schedule created the item; shown in its history. */
   schedule?: string;
 };
@@ -541,6 +641,7 @@ export async function createItem(actor: Actor, project: Row, input: CreateItemIn
   }
   const trigger = input.triggeredBy ? await resolveItem(actor, input.triggeredBy) : null;
   const status = input.status ?? project.columns[0];
+  const skill = input.skill ? normalizeSkill(input.skill) : null;
   if (!project.columns.includes(status)) throw badRequest(`Unknown status "${status}". Columns: ${project.columns.join(', ')}`);
 
   return mutate(async (tx) => {
@@ -548,14 +649,14 @@ export async function createItem(actor: Actor, project: Row, input: CreateItemIn
     const [{ n }] = await tx`update projects set next_number = next_number + 1 where id = ${project.id} returning next_number - 1 as n`;
     const [{ pos }] = await tx`select coalesce(max(position), 0) + 1 as pos from items where project_id = ${project.id} and status = ${status}`;
     const [item] = await tx`
-      insert into items (project_id, number, type, parent_id, title, body, status, position, assignee_id, created_by, closed_at)
+      insert into items (project_id, number, type, parent_id, title, body, status, position, assignee_id, created_by, closed_at, skill)
       values (${project.id}, ${n}, ${input.type}, ${parent?.id ?? null}, ${title}, ${input.body ?? ''}, ${status}, ${pos},
-              ${assignee?.id ?? null}, ${actor.id}, ${status === doneColumn(project) ? tx`now()` : null})
+              ${assignee?.id ?? null}, ${actor.id}, ${status === doneColumn(project) ? tx`now()` : null}, ${skill})
       returning id`;
     const ref = `${project.orgSlug}/${project.key}-${n}`;
     const ev = await emit(tx, {
       orgId: project.orgId, projectId: project.id, itemId: item.id, actorId: actor.id, type: 'item.created',
-      data: { ref, type: input.type, title, status, parentRef: parent?.ref, assignee: assignee?.name, triggeredBy: trigger?.ref, schedule: input.schedule },
+      data: { ref, type: input.type, title, status, parentRef: parent?.ref, assignee: assignee?.name, triggeredBy: trigger?.ref, schedule: input.schedule, skill: skill ?? undefined },
     });
     if (assignee) await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
     if (parent) {
@@ -565,6 +666,7 @@ export async function createItem(actor: Actor, project: Row, input: CreateItemIn
       await notify(tx, parent.assigneeId, pev, parent.id, 'task_added', actor);
     }
     if (trigger) await insertLink(tx, actor, trigger, { id: item.id, ref, projectId: project.id, orgId: project.orgId }, 'triggered');
+    if (!assignee) await routeItem(tx, actor, item.id);
     return ref;
   }).then((ref) => resolveItem(actor, ref));
 }
@@ -603,7 +705,7 @@ export async function removeLink(actor: Actor, linkId: string) {
   });
 }
 
-export type ItemPatch = { title?: string; body?: string; status?: string; assignee?: string | null; position?: number };
+export type ItemPatch = { title?: string; body?: string; status?: string; assignee?: string | null; position?: number; skill?: string | null };
 
 export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
   const item = await resolveItem(actor, ref);
@@ -621,6 +723,8 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     if (patch.body !== undefined && patch.body !== item.body) changes.body = [item.body, patch.body];
     if (patch.status !== undefined && patch.status !== item.status) changes.status = [item.status, patch.status];
     if (assignee !== undefined && (assignee?.id ?? null) !== item.assigneeId) changes.assignee = [item.assigneeName, assignee?.name ?? null];
+    const skill = patch.skill === undefined ? undefined : patch.skill ? normalizeSkill(patch.skill) : null;
+    if (skill !== undefined && skill !== item.skill) changes.skill = [item.skill, skill];
     const moved = patch.position !== undefined && patch.position !== item.position;
     if (Object.keys(changes).length === 0 && !moved) return;
 
@@ -638,6 +742,7 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
         status = ${status},
         position = ${position ?? item.position},
         assignee_id = ${assignee === undefined ? item.assigneeId : (assignee?.id ?? null)},
+        skill = ${skill === undefined ? item.skill : skill},
         closed_at = ${status === done ? (item.closedAt ?? new Date()) : null},
         updated_at = now()
       where id = ${item.id}`;
@@ -655,6 +760,9 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
     // Any change by someone else reaches the assignee (for a routine agent, that fires a run).
     await notify(tx, item.assigneeId, ev, item.id, changes.status ? 'status_changed' : 'updated', actor);
 
+    // A new column or skill may place an unassigned item; an explicit unassign is respected.
+    if ((changes.status || changes.skill) && patch.assignee === undefined) await routeItem(tx, actor, item.id);
+
     if (changes.status && status === done) {
       // Wake whoever was waiting on this: items it blocks, items that triggered it, and its issue when all tasks are done.
       const waiting = await tx`
@@ -671,6 +779,7 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
           await notify(tx, parent.accountId, ev, parent.id, 'all_tasks_done', actor);
         }
       }
+      await notify(tx, item.createdBy, ev, item.id, 'done', actor); // last, so a more specific reason for the same item wins
     }
   });
   return resolveItem(actor, item.id);
@@ -711,10 +820,13 @@ const eventCols = sql`
 export async function itemDetail(actor: Actor, ref: string) {
   const item = await resolveItem(actor, ref);
   const [project, parent, tasks, links, comments, history] = await Promise.all([
-    sql`select p.id, p.key, p.name, p.columns, p.guidelines, o.guidelines as org_guidelines
+    sql`select p.id, p.key, p.name, p.columns, p.column_skills, p.guidelines, o.guidelines as org_guidelines
         from projects p join orgs o on o.id = p.org_id where p.id = ${item.projectId}`.then((r) => r[0]),
     item.parentId ? sql`select ref, title, status, done from item_view where id = ${item.parentId}`.then((r) => r[0]) : null,
-    sql`select ref, title, status, done, assignee_name, assignee_kind from item_view where parent_id = ${item.id} order by number`,
+    sql`
+      select v.ref, v.title, v.status, v.done, v.assignee_name, v.assignee_kind, v.skill,
+             ${workingSql(sql`v.id`)} as working, ${blockersSql(sql`v.id`)} as blocked_by
+      from item_view v where v.parent_id = ${item.id} order by v.number`,
     // Links the actor can see; the other end may live in another project or org.
     sql`
       select l.id, l.kind, l.created_at, (l.from_id = ${item.id}) as outgoing,

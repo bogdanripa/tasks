@@ -274,3 +274,41 @@ export function Tabs<T extends string>({ tabs, labels, current, onSelect }: { ta
     </div>
   );
 }
+
+export function SkillChip({ skill, missing }: { skill: string; missing?: boolean }) {
+  return <span className={`skill ${missing ? 'missing' : ''}`}>{missing ? `needs ${skill}` : skill}</span>;
+}
+
+/** Comma-separated skills editor with suggestions; saves on Enter/blur-less Save. */
+export function SkillsEditor({ value, suggestions, onSave }: { value: string[]; suggestions: string[]; onSave: (skills: string[]) => Promise<unknown> }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (draft === null) {
+    return (
+      <span className="skills">
+        {value.map((s) => <SkillChip key={s} skill={s} />)}
+        <button className="link small" onClick={() => setDraft(value.join(', '))}>{value.length ? 'edit' : '+ skills'}</button>
+      </span>
+    );
+  }
+  return (
+    <form
+      className="skills-edit"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        try {
+          await onSave(draft.split(',').map((s) => s.trim()).filter(Boolean));
+          setDraft(null);
+          setError(null);
+        } catch (err) {
+          setError((err as Error).message);
+        }
+      }}
+    >
+      <input autoFocus list="skill-suggestions" value={draft} placeholder="backend, db" onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setDraft(null)} />
+      <datalist id="skill-suggestions">{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
+      <button className="small primary">Save</button>
+      {error && <span className="error small">{error}</span>}
+    </form>
+  );
+}

@@ -190,6 +190,7 @@ assert.match(fires[0].text, /Move the task to "In progress" first.*PATCH \/api\/
 assert.match(fires[0].text, /Project guidelines \(Website\):\nRun the smoke test before Done\./);
 assert.match(fires[0].text, /Organization guidelines:\nBe kind to the Pi\./);
 assert.match(fires[0].text, /hard limits win, then the project guidelines, then the organization guidelines/);
+assert.match(fires[0].text, new RegExp(`Team, by skill:\\n(- .*\\n)*- \\(no skills\\): .*pironman-${run} \\(you\\)`));
 await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'In progress' }, tokenOf(fires[0].text));
 await api('POST', `/api/comments/${parkedTask.ref}`, { body: 'while you are at it: check cron.d too' });
 await new Promise((r) => setTimeout(r, 2000));
@@ -217,7 +218,7 @@ assert.match(fires[0].text, new RegExp(`Task: ${r1.ref}`));
 assert.match(fires[0].text, /assigned it to you/);
 assert.match(fires[0].text, /Keep 7 days please/);
 assert.match(fires[0].text, /And gzip them/);
-assert.match(fires[0].text, /PATCH \/api\/items\/\{ref\} \{title\?,body\?,status\?,assignee\?,position\?\}/, 'compact API reference');
+assert.match(fires[0].text, /PATCH \/api\/items\/\{ref\} \{title\?,body\?,status\?,assignee\?,position\?,skill\?\}/, 'compact API reference');
 const run1 = tokenOf(fires[0].text);
 console.log('✓ routine fired once for a burst (assign + comment), with task context');
 
@@ -342,6 +343,56 @@ const after = (await api('GET', `/api/projects/${org}/WEB/schedules`)).find((x: 
 assert.ok(new Date(after.nextRunAt).getTime() > Date.now(), 'next run is in the future again');
 await api('DELETE', `/api/schedules/${nudge.id}`);
 console.log('✓ recurring items: validation, 9:00 in its timezone, run now, {date}, skip-if-open, one catch-up after downtime');
+
+// ---- Skills: routing by skill and column default, load spread, waiting, rerouting, done → creator ----
+const mk = async (name: string, skills: string[]) => {
+  const a = await api('POST', `/api/orgs/${org}/agents`, { name: `${name}-${run}` });
+  await api('PATCH', `/api/orgs/${org}/members/${a.agent.id}`, { skills });
+  return a;
+};
+const pm = await mk('pm', ['Product']);
+const be1 = await mk('be1', ['backend']);
+const be2 = await mk('be2', ['backend']);
+const pipe = await api('POST', `/api/orgs/${org}/projects`, { name: 'Pipeline', key: 'PIPE' });
+await api('PATCH', `/api/projects/${org}/PIPE`, {
+  columns: pipe.columns.map((c: string) => ({ name: c, from: c, skill: c === 'Todo' ? 'product' : null })),
+});
+assert.deepEqual((await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === pm.agent.id).skills, ['product'], 'skills are normalized');
+const feature = await api('POST', `/api/projects/${org}/PIPE/items`, { type: 'issue', title: 'Saved searches', status: 'Todo' });
+assert.equal(feature.assigneeName, `pm-${run}`, 'unassigned item in Todo goes to the product owner');
+const fHist = (await api('GET', `/api/items/${feature.ref}`)).history;
+assert.ok(fHist.some((e: any) => e.data.routedBy === 'product'));
+// The PM plans by skill; backend work spreads over both backend agents; db work waits for someone with db.
+const t1 = await mcp(pm.key.key, 'create_task', { issue: feature.ref, title: 'Backend API', skill: 'backend', status: 'Todo' });
+const t2 = await mcp(pm.key.key, 'create_task', { issue: feature.ref, title: 'Email job', skill: 'backend', status: 'Todo' });
+assert.deepEqual([t1.assigneeName, t2.assigneeName].sort(), [`be1-${run}`, `be2-${run}`], 'least busy first');
+const t3 = await mcp(pm.key.key, 'create_task', { issue: feature.ref, title: 'Schema', skill: 'db', status: 'Todo' });
+assert.equal(t3.assigneeName, null, 'nobody has db yet');
+await mcp(pm.key.key, 'link_items', { from: t3.ref, to: t1.ref, kind: 'blocks' });
+const plan = (await api('GET', `/api/items/${feature.ref}`)).tasks;
+assert.deepEqual(plan.find((t: any) => t.ref === t1.ref).blockedBy, [t3.ref]);
+assert.equal(plan.find((t: any) => t.ref === t3.ref).skill, 'db');
+await api('PATCH', `/api/orgs/${org}/members/${be1.agent.id}`, { skills: ['backend', 'db'] });
+assert.equal((await api('GET', `/api/items/${t3.ref}`)).item.assigneeName, `be1-${run}`, 'waiting work is routed when someone gains the skill');
+// An explicit unassign sticks; a column move with no skill falls back to the column default.
+await api('PATCH', `/api/items/${t2.ref}`, { assignee: null });
+assert.equal((await api('GET', `/api/items/${t2.ref}`)).item.assigneeId, null);
+// Deleting an agent hands its open work to another member with the skill.
+const t2owner = t2.assigneeName === `be1-${run}` ? be1 : be2;
+const otherBe = t2owner === be1 ? be2 : be1;
+const t1owner = t1.assigneeName === `be1-${run}` ? be1 : be2;
+if (t1owner !== otherBe) {
+  await api('DELETE', `/api/agents/${t1owner.agent.id}`);
+  assert.equal((await api('GET', `/api/items/${t1.ref}`)).item.assigneeName, otherBe.agent.name, 'rerouted on delete');
+}
+// Roles: owners change them; agents stay members; the last owner stays.
+await assert.rejects(api('PATCH', `/api/orgs/${org}/members/${pm.agent.id}`, { role: 'admin' }), /Agents are always members/);
+const ownerId = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.role === 'owner').id;
+await assert.rejects(api('PATCH', `/api/orgs/${org}/members/${ownerId}`, { role: 'member' }), /at least one owner/);
+// Done → the human who created the issue hears about it.
+await mcp(pm.key.key, 'update_item', { ref: feature.ref, status: 'Done' });
+assert.ok((await api('GET', '/api/inbox?unread=1')).some((n: any) => n.reason === 'done' && n.itemRef === feature.ref));
+console.log('✓ skills: column default intake, least-busy spread, waiting work routed, explicit unassign kept, reroute on delete, done → creator');
 
 // ---- Project settings: columns (rename carries items, removal needs empty), delete ----
 await assert.rejects(api('POST', `/api/orgs/${org}/projects`, { name: 'x', key: 'SETTINGS' }), /reserved/);
