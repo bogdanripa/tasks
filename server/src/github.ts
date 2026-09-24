@@ -4,7 +4,7 @@ import { sql } from './db.js';
 import { config } from './config.js';
 import type { Actor } from './auth.js';
 import { badRequest, fetchError, HttpError } from './errors.js';
-import { orgRole, recordEvent, resolveOrg, resolveProject } from './domain.js';
+import { addComment, orgRole, recordEvent, resolveOrg, resolveProject, updateItem } from './domain.js';
 
 /**
  * GitHub via the Tasks GitHub App: an org installs it once (choosing repos on GitHub), each project names
@@ -318,6 +318,13 @@ export function repoOps(r: RunRepo) {
      */
     async mergePullRequest(number: number) {
       const pr = await api(`/pulls/${number}`);
+      // Production is a human's call when there's a separate development branch: agents open the release PR,
+      // a person merges it. (With one branch there is no release step, so agents merge.)
+      if (r.prod !== r.base && pr.base?.ref === r.prod) {
+        throw badRequest(
+          `Merging into ${r.prod} (production) needs a human. Leave PR #${number} open (${pr.html_url}), create a task assigned to the person who filed the issue asking them to review and merge it, with the PR link in its description, make it block your issue, and end your run. Their merge closes that task and wakes you.`,
+        );
+      }
       const longLived = new Set([r.base, r.prod]);
       const method = longLived.has(pr.head?.ref) && longLived.has(pr.base?.ref) ? 'merge' : 'squash';
       await api(`/pulls/${number}/merge`, { method: 'PUT', body: { merge_method: method } });
@@ -338,6 +345,26 @@ export function repoOps(r: RunRepo) {
 }
 
 // ---------- webhooks: PRs and pushes in item history ----------
+
+/**
+ * A person merged a pull request an agent asked them to approve: the task that asked (open, assigned to a
+ * person, carrying the PR's link) is done, which unblocks the agent waiting on it.
+ */
+async function closeApprovals(p: Record<string, any>, pr: { html_url: string; merged_by?: { login?: string } }) {
+  const tasks = await sql`
+    select i.id, p.columns from items i join projects p on p.id = i.project_id join accounts a on a.id = i.assignee_id
+    where i.project_id = ${p.id} and i.closed_at is null and a.kind = 'human'
+      and (i.body like ${'%' + pr.html_url + '%'} or i.title like ${'%' + pr.html_url + '%'})`;
+  for (const t of tasks) {
+    const [a] = await sql`select a.id, a.name, a.email from items i join accounts a on a.id = i.assignee_id where i.id = ${t.id}`;
+    const person = { id: a.id, kind: 'human' as const, name: a.name, email: a.email, orgId: null };
+    // As the person (they merged it): the comment answers an agent's question task by itself…
+    await addComment(person, t.id, `Merged on GitHub${pr.merged_by?.login ? ` by ${pr.merged_by.login}` : ''}: ${pr.html_url}`);
+    // …and any other approval task is closed explicitly.
+    const [still] = await sql`select 1 from items where id = ${t.id} and closed_at is null`;
+    if (still) await updateItem(person, t.id, { status: t.columns[t.columns.length - 1] });
+  }
+}
 
 export function verifyWebhook(raw: string, signature?: string) {
   if (!gh.webhookSecret || !signature) return false;
@@ -369,6 +396,7 @@ export async function handleWebhook(event: string, body: any) {
     if (event === 'pull_request' && ['opened', 'closed', 'reopened'].includes(body.action)) {
       const pr = body.pull_request;
       const action = body.action === 'closed' ? (pr.merged ? 'merged' : 'closed') : body.action;
+      if (action === 'merged' && pr.html_url) await closeApprovals(p, pr);
       await record(mentioned(`${pr.title} ${pr.body ?? ''} ${pr.head?.ref ?? ''}`), 'github.pull_request', {
         action, number: pr.number, title: pr.title, url: pr.html_url, author: pr.user?.login,
       });

@@ -421,7 +421,7 @@ const llmServer = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'fake-mcp', 'fake-values', 'fake-wrap', 'text-embedding-3-small'].map((id) => ({ id })) });
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'fake-mcp', 'fake-values', 'fake-wrap', 'fake-release', 'text-embedding-3-small'].map((id) => ({ id })) });
     const b = JSON.parse(body);
     modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
     const userText = b.messages.find((m: any) => m.role === 'user')?.content;
@@ -463,6 +463,11 @@ const llmServer = http.createServer((req, res) => {
       ];
       if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
       return say('Shipped.');
+    }
+    if (b.model === 'fake-release') {
+      if (toolsSoFar === 0) return call('repo_merge_pull_request', { number: 1 });
+      if (toolsSoFar === 1) return call('end_run', {});
+      return say('ok');
     }
     if (b.model === 'fake-values') {
       if (toolsSoFar === 0) return call('set_project_value', { project: ref?.replace(/-\d+$/, ''), key: 'production_url', value: 'https://pong.example.com' });
@@ -573,6 +578,7 @@ const repoFiles: Record<string, Record<string, string>> = { main: { 'README.md':
 const repos: Record<string, Record<string, Record<string, string>>> = { pong: repoFiles, fresh: {} }; // fresh: a brand-new empty repo
 const ghCalls: string[] = [];
 const mergeMethods: string[] = [];
+let fakePrHead: string | null = null; // set to make pull request #1 a dev → main release
 let tokenRequests: any[] = [];
 const ghServer = http.createServer((req, res) => {
   let body = '';
@@ -619,7 +625,7 @@ const ghServer = http.createServer((req, res) => {
       return send(200, { commit: { sha: 'c1' } });
     }
     if (rest === '/pulls' && req.method === 'POST') { (files as any).__pr = b.head; return send(201, { number: 1, html_url: 'https://github.com/octo/pong/pull/1' }); }
-    if (rest === '/pulls/1' && req.method === 'GET') return send(200, { number: 1, head: { ref: (files as any).__pr }, base: { ref: 'main' } });
+    if (rest === '/pulls/1' && req.method === 'GET') return send(200, { number: 1, html_url: 'https://github.com/octo/pong/pull/1', head: { ref: fakePrHead ?? (files as any).__pr }, base: { ref: 'main' } });
     if (rest === '/pulls/1/merge') {
       mergeMethods.push(b.merge_method); Object.assign(files.main, files[(files as any).__pr]); return send(200, { merged: true }); }
     if (rest === '/pages' && req.method === 'POST') return send(201, {});
@@ -692,6 +698,20 @@ assert.ok(repos.fresh.main['README.md'] && repos.fresh.dev[`specs/${specItem.ref
 assert.equal((await api('GET', `/api/items/${specItem.ref}`)).item.status, 'Done');
 await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'main', prod: 'main' });
 assert.match(devPrompt, /repo_write_files/);
+// Releases need a human when production is its own branch: the agent's merge into it is refused.
+await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'dev', prod: 'main' });
+repoFiles.dev = { ...repoFiles.main };
+fakePrHead = 'dev';
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-release', maxSteps: 10 } });
+const rel = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Release it', status: 'Todo', assignee: house.agent.id });
+const relRun = await runFor(rel.ref);
+const relOut = (await api('GET', `/api/runs/${relRun.id}`)).steps.find((s: any) => s.kind === 'tool_result' && s.content.tool === 'repo_merge_pull_request').content.output;
+assert.match(relOut, /needs a human/, 'agents can’t merge into production');
+assert.equal(mergeMethods.length, 1, 'nothing was merged');
+fakePrHead = null;
+await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'main', prod: 'main' });
+// A person merging the release PR on GitHub closes the task that asked them to.
+const approve = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: rel.ref, title: 'Approve the release', body: 'Please merge https://github.com/octo/pong/pull/77', assignee: (await api('GET', '/api/me')).id }, house.key.key);
 // Webhooks: PRs and commits that mention an item land in its history; bad signatures are refused.
 const ghHook = async (event: string, payload: unknown, secret = 'test-webhook-secret') => {
   const raw = JSON.stringify(payload);
@@ -705,6 +725,11 @@ const prHook = await (await ghHook('pull_request', {
   pull_request: { number: 1, merged: true, title: `WEB-${itemNo}: basic Pong`, html_url: 'https://github.com/octo/pong/pull/1', user: { login: 'octo' }, head: { ref: 'x' } },
 })).json();
 assert.ok(prHook.recorded >= 1);
+await ghHook('pull_request', {
+  action: 'closed', installation: { id: 777 }, repository: { full_name: 'octo/pong' },
+  pull_request: { number: 77, merged: true, title: 'Release', html_url: 'https://github.com/octo/pong/pull/77', user: { login: 'octo' }, merged_by: { login: 'octo' }, head: { ref: 'dev' } },
+});
+assert.equal((await api('GET', `/api/items/${approve.ref}`)).item.done, true, 'merging on GitHub closes the approval task');
 await ghHook('push', { ref: 'refs/heads/main', installation: { id: 777 }, repository: { full_name: 'octo/pong' }, commits: [{ id: 'abcdef1234', message: `Fix paddle speed (WEB-${itemNo})`, url: 'u', author: { username: 'octo' } }] });
 const ghHistory = (await api('GET', `/api/items/${pongGh.ref}`)).history.map((e: any) => e.type);
 assert.ok(ghHistory.includes('github.pull_request') && ghHistory.includes('github.commit'));

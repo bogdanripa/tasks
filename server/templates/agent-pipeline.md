@@ -45,7 +45,7 @@ Every code change is reviewed by someone other than its author. When a builder m
 - If a URL you need is missing, set that environment up if you have the access (e.g. a hosting connector), or ask a human. Then save it.
 - Every change reaches the development branch through a reviewed pull request from its task branch. Nobody commits to the development or production branch directly. (Specs and designs under `specs/` are the exception: commit them to the development branch.)
 - QA and the product check test on staging. Release only what passed there.
-- **Release:** after the product check passes, open a pull request from the development branch into the production branch and link it on the issue. *(Or, if this project releases without a human: merge it yourself.)* Then check the production URL.
+- **Release (a human approves):** after the product check passes, open a pull request from the development branch into the production branch. Don't merge it: create a task assigned to the person who filed the issue, asking them to review and merge it, with the PR link in its description, make it block the issue, and end your run. Their merge on GitHub closes that task and wakes you: then check the production URL and close the issue. (If the development and production branches are the same branch, there's no release step: work reaches production when it's merged.)
 
 ### Definition of done
 - Acceptance criteria in the spec are met and checked by `qa`.
