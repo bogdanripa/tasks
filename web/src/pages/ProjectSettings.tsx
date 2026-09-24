@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useOrgName, useSession } from '../App';
-import { EditableMarkdown, ErrorNote, useFetch } from '../ui';
+import { EditableMarkdown, ErrorNote, Tabs, useFetch, useTab } from '../ui';
 import { FormModal } from './Org';
 import { NameField } from './OrgSettings';
 import { SchedulesSection } from './Schedules';
+
+const PROJECT_TABS = ['general', 'guidelines', 'board', 'recurring'] as const;
 
 type Column = { name: string; from: string | null; count: number };
 
@@ -16,6 +18,7 @@ export default function ProjectSettings() {
   const navigate = useNavigate();
   const { data, error, reload } = useFetch<{ project: any; items: any[] }>(`/api/projects/${org}/${key}`);
   const [deleting, setDeleting] = useState(false);
+  const [tab, setTab] = useTab(PROJECT_TABS);
 
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
@@ -37,7 +40,9 @@ export default function ProjectSettings() {
         <span className="sep">›</span>
       </nav>
       <h1>Settings</h1>
+      <Tabs tabs={PROJECT_TABS} labels={{ general: 'General', guidelines: 'Guidelines', board: 'Board columns', recurring: 'Recurring tasks' }} current={tab} onSelect={setTab} />
 
+      {tab === 'general' && (
       <section>
         <h2>General</h2>
         <div className="stack">
@@ -46,9 +51,10 @@ export default function ProjectSettings() {
           <p className="muted small">Key: <code>{project.key}</code> (the prefix of item references like {project.key}-12; can’t be changed)</p>
         </div>
       </section>
+      )}
 
+      {tab === 'guidelines' && (
       <section>
-        <h2>Guidelines</h2>
         <p className="muted small">
           How to work in this project: conventions, definition of done, what needs a human’s approval. Sent to agents with every run on
           this project. They take precedence over the organization’s guidelines.
@@ -60,17 +66,21 @@ export default function ProjectSettings() {
           onSave={(guidelines) => update({ guidelines })}
         />
       </section>
+      )}
 
+      {tab === 'board' && (
       <section>
-        <h2>Board columns</h2>
         <ColumnsEditor key={project.columns.join('|')} columns={project.columns} items={items} onSave={(columns) => update({ columns })} />
       </section>
+      )}
 
+      {tab === 'recurring' && (
       <section>
-        <h2>Recurring tasks</h2>
         <SchedulesSection org={org!} projectKey={key!} columns={project.columns} />
       </section>
+      )}
 
+      {tab === 'general' && (
       <section className="danger-zone">
         <div>
           <h2>Delete project</h2>
@@ -78,6 +88,7 @@ export default function ProjectSettings() {
         </div>
         <button className="danger" onClick={() => setDeleting(true)}>Delete…</button>
       </section>
+      )}
 
       {deleting && (
         <FormModal

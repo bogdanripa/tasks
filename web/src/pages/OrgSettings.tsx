@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
-import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, useFetch } from '../ui';
+import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, Tabs, useFetch, useTab } from '../ui';
 import { AgentKeyReveal } from './Agent';
 import { FormModal } from './Org';
+
+const ORG_TABS = ['general', 'guidelines', 'people', 'agents'] as const;
 
 export default function OrgSettings() {
   const { org } = useParams();
@@ -13,6 +15,7 @@ export default function OrgSettings() {
   const navigate = useNavigate();
   const [modal, setModal] = useState<'invite' | 'agent' | 'delete' | null>(null);
   const [newAgent, setNewAgent] = useState<any>(null);
+  const [tab, setTab] = useTab(ORG_TABS);
 
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
@@ -42,15 +45,18 @@ export default function OrgSettings() {
         <span className="sep">›</span>
       </nav>
       <h1>Settings</h1>
+      <Tabs tabs={ORG_TABS} labels={{ general: 'General', guidelines: 'Guidelines', people: 'People', agents: 'Agents' }} current={tab} onSelect={setTab} />
 
+      {tab === 'general' && (
       <section>
         <h2>General</h2>
         <NameField label="Organization name" value={o.name} onSave={(name) => update({ name })} />
         <p className="muted small">Slug: <code>{o.slug}</code> (used in links and item references; can’t be changed)</p>
       </section>
+      )}
 
+      {tab === 'guidelines' && (
       <section>
-        <h2>Guidelines</h2>
         <p className="muted small">
           How to work in this organization, for people and agents. Sent to agents with every run in any project here; project guidelines
           take precedence.
@@ -62,7 +68,9 @@ export default function OrgSettings() {
           onSave={(guidelines) => update({ guidelines })}
         />
       </section>
+      )}
 
+      {tab === 'people' && (
       <section>
         <div className="section-head">
           <h2>People</h2>
@@ -97,7 +105,9 @@ export default function OrgSettings() {
           ))}
         </ul>
       </section>
+      )}
 
+      {tab === 'agents' && (
       <section>
         <div className="section-head">
           <h2>Agents</h2>
@@ -115,8 +125,9 @@ export default function OrgSettings() {
           ))}
         </ul>
       </section>
+      )}
 
-      {o.role === 'owner' && (
+      {tab === 'general' && o.role === 'owner' && (
         <section className="danger-zone">
           <div>
             <h2>Delete organization</h2>

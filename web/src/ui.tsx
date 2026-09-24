@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { get, itemPath, type Event } from './api';
@@ -251,6 +251,26 @@ export function EditableMarkdown(props: { value: string; onSave: (value: string)
       }}
     >
       {props.value ? <Markdown>{props.value}</Markdown> : <span className="muted">{props.placeholder}</span>}
+    </div>
+  );
+}
+
+/** Tabs kept in the URL (?tab=…) so a tab can be linked to and survives reloads. */
+export function useTab<T extends string>(tabs: readonly T[]) {
+  const [params, setParams] = useSearchParams();
+  const current = (tabs as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as T) : tabs[0];
+  const select = (t: T) => setParams(t === tabs[0] ? {} : { tab: t }, { replace: true });
+  return [current, select] as const;
+}
+
+export function Tabs<T extends string>({ tabs, labels, current, onSelect }: { tabs: readonly T[]; labels: Record<T, string>; current: T; onSelect: (t: T) => void }) {
+  return (
+    <div className="tabs" role="tablist">
+      {tabs.map((t) => (
+        <button key={t} role="tab" aria-selected={t === current} className={t === current ? 'on' : ''} onClick={() => onSelect(t)}>
+          {labels[t]}
+        </button>
+      ))}
     </div>
   );
 }

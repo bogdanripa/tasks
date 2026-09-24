@@ -311,6 +311,11 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .schedules .avatar { vertical-align: -2px; }
 .error.small { font-size: 12px; margin: 4px 0 0; padding: 3px 8px; }
 
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 10px 0 4px; overflow-x: auto; }
+.tabs button { border: none; background: none; border-radius: 0; padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs button:hover { background: none; color: var(--text); }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
 /* modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal { background: var(--surface); border-radius: 12px; padding: 18px 20px 20px; width: min(560px, 100%); max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgb(0 0 0 / 0.3); }
