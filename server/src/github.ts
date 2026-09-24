@@ -44,9 +44,29 @@ export async function ghFetch(path: string, init: RequestInit & { token: string 
   return body as any;
 }
 
-/** An installation token, optionally limited to one repository (by name). */
+/** What the installation granted the app (e.g. whether workflows may be written), cached for a few minutes. */
+const granted = new Map<string, { at: number; permissions: Record<string, string> }>();
+async function installationPermissions(installationId: number | string) {
+  const hit = granted.get(String(installationId));
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.permissions;
+  const inst = await ghFetch(`/app/installations/${installationId}`, { token: await appJwt() });
+  const permissions = (inst?.permissions ?? {}) as Record<string, string>;
+  granted.set(String(installationId), { at: Date.now(), permissions });
+  return permissions;
+}
+
+/**
+ * An installation token, optionally limited to one repository (by name). Run tokens can also write GitHub
+ * Actions workflows when the installation grants that, so agents can set up CI deploys.
+ */
 export async function installationToken(installationId: number | string, repo?: string) {
-  const body = repo ? { repositories: [repo.split('/')[1]], permissions: { contents: 'write', pull_requests: 'write', pages: 'write', metadata: 'read' } } : undefined;
+  let body: unknown;
+  if (repo) {
+    const permissions: Record<string, string> = { contents: 'write', pull_requests: 'write', pages: 'write', metadata: 'read' };
+    const has = await installationPermissions(installationId).catch(() => ({}) as Record<string, string>);
+    if (has.workflows === 'write') permissions.workflows = 'write';
+    body = { repositories: [repo.split('/')[1]], permissions };
+  }
   const t = await ghFetch(`/app/installations/${installationId}/access_tokens`, { method: 'POST', token: await appJwt(), body: body ? JSON.stringify(body) : undefined });
   return { token: t.token as string, expiresAt: new Date(t.expires_at) };
 }
@@ -270,10 +290,18 @@ export function repoOps(r: RunRepo) {
         } catch (e) {
           if ((e as HttpError).status !== 404) throw e;
         }
-        const res = await api(`/contents/${enc(f.path)}`, {
-          method: 'PUT',
-          body: { message: files.length > 1 ? `${message} (${f.path})` : message, content: Buffer.from(f.content).toString('base64'), branch, sha },
-        });
+        let res;
+        try {
+          res = await api(`/contents/${enc(f.path)}`, {
+            method: 'PUT',
+            body: { message: files.length > 1 ? `${message} (${f.path})` : message, content: Buffer.from(f.content).toString('base64'), branch, sha },
+          });
+        } catch (e) {
+          if (f.path.startsWith('.github/workflows/')) {
+            throw badRequest(`Couldn't write ${f.path}: writing GitHub Actions workflows needs the Workflows permission. An org admin enables "Workflows: Read and write" in the Tasks GitHub App's permissions and accepts it on the installation; ask a human. (${(e as Error).message})`);
+          }
+          throw e;
+        }
         out.push(res.commit.sha);
       }
       return { branch, commits: out };

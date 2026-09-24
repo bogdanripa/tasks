@@ -568,6 +568,7 @@ const ghServer = http.createServer((req, res) => {
     const b = body ? JSON.parse(body) : {};
     ghCalls.push(`${req.method} ${p}`);
     if (req.method === 'POST' && /^\/app\/installations\/777\/access_tokens$/.test(p)) { tokenRequests.push(b); return send(201, { token: `ghs_run${tokenRequests.length}`, expires_at: new Date(Date.now() + 3600_000).toISOString() }); }
+    if (p === '/app/installations/777') return send(200, { id: 777, permissions: { contents: 'write', pull_requests: 'write', metadata: 'read', workflows: 'write' } });
     if (p === '/installation/repositories') {
       // 150 repositories, 100 per page: the ones the tests use are on page 2.
       const all = [...Array.from({ length: 148 }, (_, i) => ({ full_name: `octo/filler-${String(i).padStart(3, '0')}` })), { full_name: 'octo/pong' }, { full_name: 'octo/fresh' }];
@@ -651,6 +652,7 @@ assert.equal(pongGhNow.item.status, 'Done');
 assert.match(pongGhNow.comments.at(-1).body, /octo\.github\.io\/pong/);
 assert.match(repoFiles.main['index.html'], /pong/, 'merged into main');
 assert.deepEqual(tokenRequests[0]?.repositories, ['pong'], 'run token limited to the project repo');
+assert.equal(tokenRequests[0]?.permissions?.workflows, 'write', 'workflows can be written when the installation grants it');
 const devPrompt = (await api('GET', `/api/runs/${devRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text;
 assert.match(devPrompt, /Repository: https:\/\/github\.com\/octo\/pong\. Branch: main \(production; work lands on it directly/);
 await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'dev', prod: 'main' });
