@@ -147,7 +147,7 @@ ${roster}
 ${guidelines(`Project guidelines (${project.name})`, project.guidelines)}${guidelines('Organization guidelines', p.orgGuidelines)}
 Task: ${item.ref} (${item.type}) ${q(item.title)}
 Status: ${item.status}. Board columns: ${project.columns.join(' → ')} (the last one means done).${item.skill ? `\nNeeds skill: ${item.skill}` : ''}${p.parent ? `\nParent issue: ${p.parent.ref} ${q(p.parent.title)}` : ''}
-Link for humans: ${config.publicUrl}/i/${item.ref}
+Link for humans: ${config.publicUrl}/app/i/${item.ref}
 
 What changed since the last run:
 ${p.changes.map((c) => `- ${c}`).join('\n')}

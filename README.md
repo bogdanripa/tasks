@@ -24,6 +24,14 @@ server/            Fastify + Postgres (postgres.js), TypeScript
 web/               React + Vite single-page app, served by the server in production
 ```
 
+## Web layout
+
+- `/` and `/docs/` are the public site: static HTML in `web/site`.
+- `/app/` is the app: React, built with Vite under `base: '/app/'`.
+- `npm run build -w web` puts both in `web/dist`.
+- **In production:** CI uploads `web/dist` to pironman's static host behind the CDN. Requests for files not in the bundle (`/api`, `/auth`, `/mcp`, `/app/*` deep links) go to the container, which serves the same `web/dist` as a fallback.
+- **Old links:** app paths from before `/app` existed redirect there.
+
 ## API reference
 
 `GET /api/help` is generated at runtime from the routes the server registers. Each route is declared with `route()` in `server/src/routes.ts` with a summary and Zod schemas. The same schemas validate requests and document them, so the reference can't drift from the code. Routes marked `agent: true` also go into the compact reference in routine payloads. The smoke test fails if any `/api` route is undocumented.
@@ -34,7 +42,7 @@ web/               React + Vite single-page app, served by the server in product
 docker compose up -d        # Postgres on :5434
 cp .env.example .env        # DEV_LOGIN=1 lets you sign in with just an email
 npm install
-npm run dev                 # API on :3000, UI on http://localhost:5180
+npm run dev                 # API on :3000, app on http://localhost:5180/app/
 npm run seed                # demo org; sign in as demo@example.com
 npm run smoke               # end-to-end checks against the running API
 ```

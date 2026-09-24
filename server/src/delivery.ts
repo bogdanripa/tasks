@@ -55,7 +55,7 @@ async function deliverDue() {
           title: n.itemTitle,
           type: n.itemType,
           status: n.itemStatus,
-          url: `${config.publicUrl}/i/${n.itemRef}`,
+          url: `${config.publicUrl}/app/i/${n.itemRef}`,
         },
         event: { type: n.eventType, data: n.eventData, actor: { name: n.actorName, kind: n.actorKind } },
         mcp: `${config.publicUrl}/mcp`,

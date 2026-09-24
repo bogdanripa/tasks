@@ -140,7 +140,7 @@ export function authRoutes(app: FastifyInstance) {
       picture: payload.picture as string | undefined,
     });
     await startSession(reply, id);
-    return reply.redirect('/');
+    return reply.redirect('/app/');
   });
 
   if (config.devLogin) {

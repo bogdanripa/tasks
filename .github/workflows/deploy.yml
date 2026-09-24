@@ -178,3 +178,29 @@ jobs:
           echo "(check: apps_logs tasks) or the app does not serve"
           echo "/healthz; fix the route or change health_path"
           exit 1
+
+  # The public site (/, /docs/) and the app's static files (/app/) as a static bundle, served by the
+  # shared static host behind the CDN. Anything not in the bundle (/api, /auth, /mcp, /app/* deep
+  # links) falls through to the container. From apps_deploy_workflow's optional frontend job.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+      - run: npm run build -w web
+
+      # Zip the CONTENTS of the build output: index.html must be at the zip's root.
+      - name: Package the bundle
+        run: cd web/dist && zip -qr "$GITHUB_WORKSPACE/site.zip" .
+
+      # PAAS_KEY is this app's scoped deploy key.
+      - name: Upload the frontend
+        run: |
+          curl -fsS -X PUT \
+            -H "Authorization: Bearer ${{ secrets.PAAS_KEY }}" \
+            --data-binary @site.zip \
+            "https://api-coolify.bogdanripa.com/apps/tasks/frontend"

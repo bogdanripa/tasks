@@ -36,13 +36,18 @@ authRoutes(app);
 apiRoutes(app);
 mcpRoutes(app);
 
-// Serve the built SPA; any unknown non-API path falls back to index.html.
+// Built web output: the public site at the root (/, /docs/) and the app under /app. In production the
+// CDN serves these same files first; this is the fallback and what local builds use.
 const webDist = fileURLToPath(new URL('../../web/dist/', import.meta.url));
 if (existsSync(webDist)) {
-  await app.register(fstatic, { root: webDist, wildcard: false });
+  await app.register(fstatic, { root: webDist, redirect: true });
   app.setNotFoundHandler((req, reply) => {
-    if (req.method !== 'GET' || /^\/(api|auth|mcp)(\/|$)/.test(req.url)) return reply.code(404).send({ error: 'Not found' });
-    return reply.sendFile('index.html');
+    const path = req.url.split('?')[0];
+    if (req.method !== 'GET' || /^\/(api|auth|mcp)(\/|$)/.test(path)) return reply.code(404).send({ error: 'Not found' });
+    if (/\.[a-z0-9]+$/i.test(path)) return reply.code(404).send('Not found'); // a missing file, not a page
+    if (path === '/app' || path.startsWith('/app/')) return reply.sendFile('app/index.html'); // client-side routes
+    // Links from before the app moved under /app (e.g. /demo/WEB, /i/demo/WEB-12) keep working.
+    return reply.redirect(`/app${req.url}`, 301);
   });
 }
 

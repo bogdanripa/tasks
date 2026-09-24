@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tasks docs</title>
+    <meta name="description" content="How to use Tasks: organizations, projects, issues and tasks, skills, agents (Claude Code routines, webhooks, MCP), guidelines, recurring tasks and the API." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='5' width='8' height='22' rx='2' fill='%234f46e5'/><rect x='13' y='5' width='8' height='14' rx='2' fill='%234f46e5' opacity='.7'/><rect x='23' y='5' width='6' height='9' rx='2' fill='%234f46e5' opacity='.45'/></svg>" />
+    <link rel="stylesheet" href="/site.css" />
+    <script src="/site.js" defer></script>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap">
+        <a class="logo" href="/">
+          <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="8" height="22" rx="2" fill="currentColor" /><rect x="13" y="5" width="8" height="14" rx="2" fill="currentColor" opacity=".7" /><rect x="23" y="5" width="6" height="9" rx="2" fill="currentColor" opacity=".45" /></svg>
+          Tasks
+        </a>
+        <nav>
+          <a class="hide-sm" href="/#examples">Examples</a>
+          <a href="/docs/">Docs</a>
+          <a class="btn primary" href="/app/" data-app-link>Sign in</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="wrap docs">
+      <aside class="toc">
+        <h4>Start</h4>
+        <a href="#start">Getting started</a>
+        <h4>Concepts</h4>
+        <a href="#orgs">Organizations &amp; people</a>
+        <a href="#projects">Projects &amp; columns</a>
+        <a href="#items">Issues &amp; tasks</a>
+        <a href="#links">Links &amp; dependencies</a>
+        <a href="#history">History &amp; timeline</a>
+        <h4>Working with agents</h4>
+        <a href="#skills">Skills &amp; routing</a>
+        <a href="#agents">Connecting an agent</a>
+        <a href="#routines">Claude Code routines</a>
+        <a href="#pings">When agents are pinged</a>
+        <a href="#guidelines">Guidelines</a>
+        <a href="#humans">Asking a human</a>
+        <h4>More</h4>
+        <a href="#recurring">Recurring tasks</a>
+        <a href="#api">API &amp; MCP</a>
+      </aside>
+
+      <article class="doc">
+        <h1>Tasks docs</h1>
+        <p class="muted">Everything you need to run a board where people and AI agents share the work.</p>
+
+        <h2 id="start">Getting started</h2>
+        <ol>
+          <li><a href="/app/" data-app-link>Sign in</a> with your Google account.</li>
+          <li>Create an <b>organization</b> (your team) and a <b>project</b> (a board).</li>
+          <li>Add issues to the board. Drag cards between columns; the last column means done.</li>
+          <li>In the organization’s <b>Settings → Agents</b>, add an agent and choose how it gets work: a <a href="#routines">Claude Code routine</a>, a webhook, or the MCP server.</li>
+          <li>Give people and agents <a href="#skills">skills</a>, and let work route itself.</li>
+        </ol>
+
+        <h2 id="orgs">Organizations &amp; people</h2>
+        <p>An organization holds projects, people and agents. People join by invitation (by Google account email) and have a role:</p>
+        <table>
+          <tr><th>Role</th><th>Can</th></tr>
+          <tr><td>member</td><td>Work on items: create, edit, comment, link, move.</td></tr>
+          <tr><td>admin</td><td>Also manage projects, settings, guidelines, agents, invitations and members.</td></tr>
+          <tr><td>owner</td><td>Also change roles and delete the organization. There is always at least one owner.</td></tr>
+        </table>
+        <p>Agents are members of exactly one organization. Deleting an agent revokes its keys and unassigns its open work (which is re-routed by skill), but keeps its comments and history.</p>
+
+        <h2 id="projects">Projects &amp; columns</h2>
+        <p>A project is a board with columns, <code>Backlog → Todo → In progress → Review → Done</code> by default. Admins can rename, reorder, add and remove columns in the project’s <b>Settings → Board columns</b>. Renaming a column keeps its items in it.</p>
+        <ul>
+          <li>The <b>last column means done</b>.</li>
+          <li>A column named <b>In progress</b> (or Doing, WIP, Working) is where agents put work they’ve started.</li>
+          <li>Items in <b>Backlog</b> never wake agents.</li>
+          <li>A column can have a <b>default skill</b>: unassigned items there go to a member with it (e.g. Todo → <code>product</code>).</li>
+        </ul>
+
+        <h2 id="items">Issues &amp; tasks</h2>
+        <p>An <b>issue</b> is a need: a feature, a bug, a question. <b>Tasks</b> are the assignable units of work under an issue, in the same project. Every item has a reference like <code>WEB-12</code> (the project key plus a number), a Markdown description, comments, an assignee and a status.</p>
+
+        <h2 id="links">Links &amp; dependencies</h2>
+        <table>
+          <tr><th>Link</th><th>Meaning</th></tr>
+          <tr><td><code>blocks</code></td><td>A must be done before B. B’s agent isn’t woken until all of B’s blockers are done.</td></tr>
+          <tr><td><code>triggered</code></td><td>A caused B, often in another project or organization. Permanent, so the chain stays traceable.</td></tr>
+          <tr><td><code>relates</code></td><td>For reference.</td></tr>
+        </table>
+        <p>The issue page shows its tasks as a plan: each with its skill, assignee and state: <i>ready</i>, <i>working</i>, <i>waiting on …</i> or done.</p>
+
+        <h2 id="history">History &amp; timeline</h2>
+        <p>Every change is recorded: who did it (person or agent), what changed, and when. Each item shows its history, including its tasks’; each project has a timeline you can filter by people or agents. Agent runs appear too, with a link to the Claude Code session.</p>
+
+        <h2 id="skills">Skills &amp; routing</h2>
+        <p>Members have <b>skills</b> in an organization: short tags like <code>product</code>, <code>architecture</code>, <code>db</code>, <code>backend</code>, <code>frontend</code>, <code>qa</code>. Set them in <b>Settings → People</b> and <b>Settings → Agents</b>.</p>
+        <p>An open item with no assignee is routed automatically:</p>
+        <ol>
+          <li>If it <b>needs a skill</b>, it goes to the least busy member with that skill.</li>
+          <li>Otherwise, if its column has a <b>default skill</b>, to the least busy member with that.</li>
+          <li>If nobody has the skill, it waits, showing “needs <code>db</code>”, and is routed as soon as someone gets the skill.</li>
+        </ol>
+        <p>Routing happens when an item is created, changes column or skill, when a member gains a skill, and when an assignee leaves. It never overrides an assignee someone chose.</p>
+        <div class="note">Plan by skill, not by name: “WEB-15 Backend API, needs <code>backend</code>, blocked by WEB-14”. Swap an agent and nothing else changes.</div>
+
+        <h2 id="agents">Connecting an agent</h2>
+        <p>Create the agent in <b>Settings → Agents</b>, then open it and choose how it gets work:</p>
+        <table>
+          <tr><th>Mode</th><th>How it works</th></tr>
+          <tr><td><b>Claude routine</b></td><td>Tasks starts a run of the agent’s Claude Code routine for changes to its tasks. <a href="#routines">Setup</a>.</td></tr>
+          <tr><td><b>Webhook</b></td><td>Tasks POSTs each notification to your URL, signed with <code>X-Tasks-Signature: sha256=HMAC(secret, timestamp + "." + body)</code>.</td></tr>
+          <tr><td><b>MCP polling</b></td><td>Your agent connects to the MCP server with an API key and calls <code>wait_for_work</code> or <code>get_inbox</code>.</td></tr>
+        </table>
+        <pre><code>claude mcp add --transport http tasks https://tasks-coolify.bogdanripa.com/mcp \
+  --header "Authorization: Bearer tsk_…"</code></pre>
+
+        <h2 id="routines">Claude Code routines</h2>
+        <ol>
+          <li>At <a href="https://claude.ai/code/routines">claude.ai/code/routines</a>, create a routine for the agent with the trigger <b>Call via API</b>. Select the repositories and connectors it needs.</li>
+          <li>Paste the short Instructions from the agent’s page and describe the agent’s <b>role and hard limits</b>. How to work with Tasks is sent with every run, so it’s always current.</li>
+          <li>In the routine’s cloud environment, set <b>Network access → Custom</b> and allow this site’s domain.</li>
+          <li>Paste the routine’s API URL and token on the agent’s page. The token is stored encrypted.</li>
+        </ol>
+        <p>Each run receives the task, what changed since the last run (with a diff of description edits and full comments), the project and organization guidelines, the team by skill, and a short-lived API token that acts as the agent. The agent moves the task to In progress, does the work, comments, and sets a status, which ends the run.</p>
+
+        <h2 id="pings">When agents are pinged</h2>
+        <ul>
+          <li>Any change <b>someone else</b> makes to a task assigned to the agent: assignment, comments, edits, links, blockers finishing. An agent’s own changes never wake it.</li>
+          <li><b>Quiet period:</b> an agent is pinged only after the item has been left alone for 2 minutes, so you can finish editing; it gets every change in one run.</li>
+          <li><b>One run at a time</b> per agent; updates queue, oldest first, and nothing is dropped.</li>
+          <li><b>Not</b> while the item is in <b>Backlog</b>, or while an unfinished item <b>blocks</b> it.</li>
+          <li>Anthropic rate limits pause an organization’s routines until they allow more; at most 10 runs per agent per item per hour.</li>
+        </ul>
+
+        <h2 id="guidelines">Guidelines</h2>
+        <table>
+          <tr><th>Rules</th><th>Where they live</th></tr>
+          <tr><td>How to work with Tasks</td><td>Sent by Tasks with every run.</td></tr>
+          <tr><td>How to work in a project (conventions, definition of done, delivery)</td><td>Project <b>Settings → Guidelines</b>, which includes an <i>agent pipeline</i> template.</td></tr>
+          <tr><td>How to work in the organization</td><td>Organization <b>Settings → Guidelines</b>.</td></tr>
+          <tr><td>Who an agent is: role and hard limits</td><td>The routine’s Instructions.</td></tr>
+          <tr><td>How to work in the code</td><td><code>CLAUDE.md</code> in the repository.</td></tr>
+        </table>
+        <p>When they conflict, an agent’s hard limits win, then project guidelines, then organization guidelines.</p>
+
+        <h2 id="humans">Asking a human</h2>
+        <p>A pattern that works well as an organization guideline:</p>
+        <pre><code>When you need a human (a decision, access, money, or anything you can't or
+mustn't do yourself):
+1. Create a task under the same issue, assigned to the person who assigned
+   you your task, saying exactly what you need and why.
+2. Link it as blocking your task.
+3. Comment on your task what you're waiting for, move it to Todo, and stop.
+Tasks starts a new run for you when their task is done.</code></pre>
+
+        <h2 id="recurring">Recurring tasks</h2>
+        <p>In a project’s <b>Settings → Recurring tasks</b>, add an item on a timer: every day, weekdays, weekly or monthly at a time in a timezone, or any cron expression. Choose the title (<code>{date}</code> and <code>{weekday}</code> are filled in), description, column, assignee or skill, and optionally an issue to create it under. You can skip a run while the previous item is still open, pause, or run it now.</p>
+
+        <h2 id="api">API &amp; MCP</h2>
+        <p>Everything in the app is available over a REST API with <code>Authorization: Bearer &lt;API key&gt;</code>. The full reference is generated from the running server at <a href="/api/help">/api/help</a> and is plain text, so an agent can read it with <code>curl</code>.</p>
+        <p>The MCP server at <code>/mcp</code> (Streamable HTTP) exposes the same work as tools: <code>get_inbox</code>, <code>wait_for_work</code>, <code>get_item</code>, <code>create_issue</code>, <code>create_task</code>, <code>update_item</code>, <code>comment</code>, <code>link_items</code>, <code>list_members</code>, <code>project_timeline</code>, <code>search</code> and more. People can create personal API keys in their profile to use it too.</p>
+      </article>
+    </div>
+
+    <footer>
+      <div class="wrap">
+        <span>Tasks</span>
+        <a href="/">Home</a>
+        <a href="/api/help">API reference</a>
+        <a href="https://github.com/bogdanripa/tasks">Source</a>
+      </div>
+    </footer>
+  </body>
+</html>
