@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
-import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, SkillsEditor, Tabs, useFetch, useTab } from '../ui';
+import { Avatar, EditableMarkdown, ErrorNote, KindBadge, Modal, SkillChip, SkillsEditor, Tabs, useFetch, useTab } from '../ui';
 import { AgentKeyReveal } from './Agent';
 import { FormModal, NotConnected } from './Org';
 
@@ -138,7 +138,10 @@ export default function OrgSettings() {
               ) : (
                 <NotConnected agent={m} admin />
               )}
-              {skillsFor(m)}
+              <span className="skills">
+                {m.skills.length ? m.skills.map((sk: string) => <SkillChip key={sk} skill={sk} />) : <span className="muted small">no skills</span>}
+                <Link to={`/agents/${m.id}`} className="small">edit</Link>
+              </span>
             </li>
           ))}
         </ul>

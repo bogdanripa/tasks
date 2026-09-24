@@ -44,8 +44,12 @@ export type Pending = {
   itemBlocked: boolean;
 };
 
-/** A run with no API activity for this long is treated as over (crashed, stuck or finished without a status change). */
-const RUN_IDLE_MINUTES = 20;
+/** A run that never calls Tasks within this long is released (usually the routine's network allowlist). */
+const RUN_CHECKIN_MINUTES = 10;
+/** A run with no API activity for this long is released (crashed or stuck). Real runs take minutes. */
+const RUN_IDLE_MINUTES = 120;
+/** The routine API accepts 65,536 characters of text; stay under it with room to spare. */
+const MAX_PAYLOAD = 60_000;
 const RECHECK_SECONDS = 30;
 const q = (s: string) => `"${s.replace(/\s+/g, ' ').slice(0, 300)}"`;
 
@@ -82,7 +86,7 @@ function describeEdits(who: string, changes: Record<string, [any, any]> = {}) {
   return parts.length ? parts.join('\n- ') : `${who} updated it`;
 }
 
-function describeChange(c: Record<string, any>): string {
+function describeChange(c: Record<string, any>, commentLimit = 4000): string {
   const d = c.data ?? {};
   const who = c.actorName;
   switch (c.reason) {
@@ -90,7 +94,8 @@ function describeChange(c: Record<string, any>): string {
       return `${who} assigned it to you`;
     case 'commented': {
       // The event keeps an excerpt; runs get the full comment (capped), quoted.
-      const text = (c.commentBody ?? d.excerpt ?? '').slice(0, 4000);
+      const full: string = c.commentBody ?? d.excerpt ?? '';
+      const text = full.length > commentLimit ? `${full.slice(0, commentLimit)}… (shortened; read it in full on the task)` : full;
       return `${who} commented:\n${text.split('\n').map((l: string) => `    > ${l}`).join('\n')}`;
     }
     case 'status_changed':
@@ -142,13 +147,18 @@ function buildPayload(p: {
     .map(([sk, names]) => `- ${sk}: ${names.join(', ')}`).join('\n');
   const guidelines = (title: string, text: string) =>
     text.trim() ? `\n${title}:\n${text.trim().slice(0, MAX_GUIDELINES)}${text.length > MAX_GUIDELINES ? '\n(truncated)' : ''}\n` : '';
+  const json = `-H 'content-type: application/json'`;
+  const setStatus = (st: string) => `curl -s -X PATCH ${auth} ${json} -d '{"status":"${st}"}' $TASKS/api/items/${item.ref}`;
   return `Tasks run for agent "${p.agentName}".
 
+First, in your shell (the token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}; never put it in comments):
+  export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
+
 How to work (from Tasks):
-1. ${p.working ? `Move the task to "${p.working}" first, so people see you're on it: PATCH /api/items/${item.ref} {"status":"${p.working}"}. That doesn't end your run.` : 'This board has no in-progress column, so start right away.'}
+1. ${p.working ? `Move the task to "${p.working}" first, so people see you're on it (this doesn't end your run):\n   ${setStatus(p.working)}` : 'This board has no in-progress column, so start right away.'}
 2. Read the task, including comments and links: curl -s ${auth} $TASKS/api/items/${item.ref}
 3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
-4. Comment with what you did, then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Tasks hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run with POST /api/runs/end.
+4. Comment with what you did (curl -s -X POST ${auth} ${json} -d '{"body":"..."}' $TASKS/api/comments/${item.ref}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Tasks hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: curl -s -X POST ${auth} $TASKS/api/runs/end
 5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn ? `
 Reviewing: a task in "${p.reviewColumn}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
 
@@ -156,7 +166,7 @@ ALL TASKS UNDER THIS ISSUE ARE DONE. This run is the definition-of-done check:
 - Check the result against the spec's acceptance criteria and the definition of done in the project guidelines.
 - Anything missing or wrong: create a task for it (with a skill), comment what's missing, and end the run. You'll be woken when it's done.
 - Everything passes: deliver as the project guidelines say (pull request or merge), comment what shipped with the link, and move the issue to "${done}".` : ''}
-To hand work to others, create tasks under the issue with a "skill" and no assignee; Tasks gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
+Do the work yourself when you can. Create tasks only to hand parts to others or to split work you'll do next (tasks you assign yourself wake you after this run). To hand work to others, create tasks under the issue with a "skill" and no assignee; Tasks gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
 If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines. Never put the API token in comments.
 
 Team, by skill:
@@ -172,8 +182,7 @@ ${p.changes.map((c) => `- ${c}`).join('\n')}
 Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
-Tasks API. The token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}.
-  export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
+Tasks API (with the TASKS and TASKS_TOKEN set above).
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
 ${compactReference()}`;
 }
@@ -194,10 +203,9 @@ async function agentBusyUntil(agentId: string, orgId: string): Promise<{ until: 
   const [{ checkedAt }] = await sql`select now() as checked_at`;
   const [pause] = await sql`select until from routine_pauses where org_id = ${orgId} and until > now()`;
   if (pause) return { until: pause.until, checkedAt };
+  // An unfinished run holds the agent; sweepStaleRuns releases runs that crashed or never started.
   const [active] = await sql`
-    select 1 from agent_runs r left join api_keys k on k.id = r.key_id
-    where r.agent_id = ${agentId} and r.status = 'fired' and r.finished_at is null
-      and coalesce(k.last_used_at, r.created_at) > now() - ${RUN_IDLE_MINUTES + ' minutes'}::interval`;
+    select 1 from agent_runs r where r.agent_id = ${agentId} and r.status = 'fired' and r.finished_at is null`;
   return { until: active ? new Date(Date.now() + RECHECK_SECONDS * 1000) : null, checkedAt };
 }
 
@@ -209,6 +217,49 @@ async function itemWindowOpensAt(agentId: string, itemId: string): Promise<Date 
     order by created_at desc limit ${MAX_RUNS_PER_ITEM_PER_HOUR}`;
   if (runs.length < MAX_RUNS_PER_ITEM_PER_HOUR) return null;
   return new Date(new Date(runs[runs.length - 1].createdAt).getTime() + 3600_000);
+}
+
+async function releaseRun(run: Record<string, any>, error: string) {
+  const [done] = await sql`
+    update agent_runs set finished_at = now(), error = ${error} where id = ${run.id} and finished_at is null returning id`;
+  if (!done) return false;
+  if (run.keyId) await sql`update api_keys set revoked_at = now() where id = ${run.keyId} and revoked_at is null`;
+  await sql`update notifications set next_attempt_at = now() where account_id = ${run.agentId} and delivery_status = 'pending'`;
+  if (run.itemId) {
+    const [item] = await sql`select org_id, project_id from item_view where id = ${run.itemId}`;
+    if (item) {
+      await recordEvent({
+        orgId: item.orgId, projectId: item.projectId, itemId: run.itemId, actorId: run.agentId, type: 'agent.run_failed',
+        data: { error },
+      });
+    }
+  }
+  return true;
+}
+
+/** Release runs that never reached Tasks or went quiet, so the agent's queue moves on. Runs every worker tick. */
+export async function sweepStaleRuns() {
+  const host = new URL(config.publicUrl).host;
+  const stale = await sql`
+    select r.id, r.agent_id, r.item_id, r.key_id, k.last_used_at from agent_runs r left join api_keys k on k.id = r.key_id
+    where r.status = 'fired' and r.finished_at is null and (
+      (k.last_used_at is null and r.created_at < now() - ${RUN_CHECKIN_MINUTES + ' minutes'}::interval) or
+      (k.last_used_at < now() - ${RUN_IDLE_MINUTES + ' minutes'}::interval))`;
+  for (const run of stale) {
+    await releaseRun(
+      run,
+      run.lastUsedAt
+        ? `no activity for ${RUN_IDLE_MINUTES / 60} hours, so Tasks released the agent; the run may have crashed`
+        : `the run never reached Tasks within ${RUN_CHECKIN_MINUTES} minutes. Check that the routine's cloud environment allows ${host} (Network access → Custom), and open the session to see what happened`,
+    );
+  }
+}
+
+/** An admin ends a run by hand (e.g. it's stuck), releasing the agent. */
+export async function endRunById(runId: string, by: string) {
+  const [run] = await sql`select id, agent_id, item_id, key_id from agent_runs where id = ${runId}`;
+  if (!run) return false;
+  return releaseRun(run, `ended by ${by}`);
 }
 
 /**
@@ -288,17 +339,35 @@ async function fireRoutine(rows: Pending[]) {
 
   const expiresAt = new Date(Date.now() + RUN_TOKEN_HOURS * 3600_000);
   const key = await mintApiKey(first.agentId, `run ${item.ref}`, expiresAt);
-  const text = buildPayload({
-    working: workingColumn(project.columns),
-    reviewColumn: Object.keys(project.columnHandoffs ?? {})[0],
-    dodCheck: item.type === 'issue' && rows.some((r) => r.reason === 'all_tasks_done'),
-    orgGuidelines: project.orgGuidelines,
-    team: [...(await sql`
-      select a.name, a.kind, m.skills from memberships m join accounts a on a.id = m.account_id
-      where m.org_id = ${item.orgId} and a.deactivated_at is null order by a.kind desc, a.name`)] as any,
-    agentName: first.agentName, item, project, parent, token: key.key, expiresAt,
-    changes: [...new Set(changes.map(describeChange))],
-  });
+  const team = [...(await sql`
+    select a.name, a.kind, m.skills from memberships m join accounts a on a.id = m.account_id
+    where m.org_id = ${item.orgId} and a.deactivated_at is null order by a.kind desc, a.name`)] as any[];
+  const build = (changeLines: string[]) =>
+    buildPayload({
+      working: workingColumn(project.columns),
+      reviewColumn: Object.keys(project.columnHandoffs ?? {})[0],
+      dodCheck: item.type === 'issue' && rows.some((r) => r.reason === 'all_tasks_done'),
+      orgGuidelines: project.orgGuidelines,
+      team, agentName: first.agentName, item, project, parent, token: key.key, expiresAt,
+      changes: changeLines,
+    });
+  const lines = (commentLimit?: number) => [...new Set(changes.map((c) => describeChange(c, commentLimit)))];
+  let text = build(lines());
+  // Too long for the routine API (many long comments or diffs): shorten comments first, then drop the
+  // oldest comments. Assignments, status changes and blocker news are always kept.
+  if (text.length > MAX_PAYLOAD) text = build(lines(500));
+  if (text.length > MAX_PAYLOAD) {
+    const short = changes.map((c) => ({ line: describeChange(c, 500), comment: c.reason === 'commented' }));
+    let drop = 0;
+    const commentCount = short.filter((x) => x.comment).length;
+    while (text.length > MAX_PAYLOAD && drop < commentCount) {
+      drop = Math.min(commentCount, Math.max(1, drop * 2));
+      let skipped = 0;
+      const kept = short.filter((x) => !(x.comment && skipped++ < drop)).map((x) => x.line);
+      text = build([`(${drop} earlier comments omitted: read them on the task)`, ...new Set(kept)]);
+    }
+  }
+  if (text.length > MAX_PAYLOAD) text = text.slice(0, MAX_PAYLOAD - 200) + '\n\n(truncated: fetch the task for the rest)';
 
   let error: string | null = null;
   let retryAfter: number | null = null;

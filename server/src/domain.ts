@@ -113,8 +113,15 @@ async function emit(tx: Db, e: EventInput): Promise<number> {
   return Number(row.id);
 }
 
+/**
+ * Workflow notifications that matter even when you caused them: a task you routed to yourself, a
+ * blocker you finished, the last task under your issue. (Edits and comments you make never wake you.)
+ */
+const SELF_NOTIFY = new Set(['assigned', 'unblocked', 'all_tasks_done', 'triggered_item_done']);
+
 async function notify(tx: Db, accountId: string | null | undefined, eventId: number, itemId: string | null, reason: string, actor: Actor) {
-  if (!accountId || accountId === actor.id) return;
+  if (!accountId) return;
+  if (accountId === actor.id && !(actor.kind === 'agent' && SELF_NOTIFY.has(reason))) return;
   const quiet = `${config.agentQuietSeconds} seconds`;
   const [row] = await tx`
     insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
@@ -632,9 +639,7 @@ const doneColumn = (p: Row) => p.columns[p.columns.length - 1] as string;
 
 /** True while an agent run on the item is active (fired, not finished, token used recently). */
 const workingSql = (itemId: ReturnType<typeof sql>) => sql`exists (
-  select 1 from agent_runs r left join api_keys k on k.id = r.key_id
-  where r.item_id = ${itemId} and r.status = 'fired' and r.finished_at is null
-    and coalesce(k.last_used_at, r.created_at) > now() - interval '20 minutes')`;
+  select 1 from agent_runs r where r.item_id = ${itemId} and r.status = 'fired' and r.finished_at is null)`;
 /** Refs of the open items blocking this one. */
 const blockersSql = (itemId: ReturnType<typeof sql>) => sql`array(
   select b.ref from links l join item_view b on b.id = l.from_id
@@ -696,7 +701,8 @@ export async function createItem(actor: Actor, project: Row, input: CreateItemIn
     throw badRequest('Issues cannot have a parent; use triggered_by to link issues');
   }
   const trigger = input.triggeredBy ? await resolveItem(actor, input.triggeredBy) : null;
-  const status = input.status ?? project.columns[0];
+  // New items start in the first column that isn't Backlog: Backlog is parked work and never wakes agents.
+  const status = input.status ?? (project.columns[0].toLowerCase() === 'backlog' && project.columns.length > 2 ? project.columns[1] : project.columns[0]);
   const skill = input.skill ? normalizeSkill(input.skill) : null;
   if (!project.columns.includes(status)) throw badRequest(`Unknown status "${status}". Columns: ${project.columns.join(', ')}`);
 

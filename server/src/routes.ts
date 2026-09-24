@@ -5,7 +5,7 @@ import { mintApiKey, requireActor } from './auth.js';
 import { badRequest } from './errors.js';
 import * as d from './domain.js';
 import { config } from './config.js';
-import { routineInstructions } from './routine.js';
+import { endRunById, routineInstructions } from './routine.js';
 import { PIPELINE_TEMPLATE } from './starter.js';
 import { fullReference, route } from './apidoc.js';
 import * as sched from './schedules.js';
@@ -137,6 +137,8 @@ export function apiRoutes(app: FastifyInstance) {
       sql`select until, reason from routine_pauses where org_id = ${agent.orgId} and until > now()`,
     ]);
     const [{ slug: orgSlug }] = await sql`select slug from orgs where id = ${agent.orgId}`;
+    const [{ skills }] = await sql`select skills from memberships where org_id = ${agent.orgId} and account_id = ${agent.id}`;
+    const orgSkills = await sql`select distinct unnest(skills) as s from memberships where org_id = ${agent.orgId}`;
     return {
       agent: {
         id: agent.id,
@@ -147,6 +149,8 @@ export function apiRoutes(app: FastifyInstance) {
         routineUrl: agent.routineUrl,
         hasRoutineToken: !!agent.routineTokenEnc,
         description: agent.description,
+        skills,
+        skillSuggestions: [...new Set([...d.SUGGESTED_SKILLS, ...orgSkills.map((r) => r.s as string)])].sort(),
       },
       keys: await d.listKeys(agent.id),
       deliveries,
@@ -171,6 +175,14 @@ export function apiRoutes(app: FastifyInstance) {
     section: 'Agents',
     summary: 'delete (deactivate) an agent: keys revoked, open items unassigned, history kept (admins)',
   }, async (req) => d.deleteAgent(await requireActor(req), req.params.id));
+  route(app, 'POST', '/api/agents/:id/runs/:run/end', {
+    section: 'Agents',
+    summary: 'end one of an agent’s runs by hand, e.g. when it’s stuck (admins); the agent’s queue moves on',
+  }, async (req) => {
+    const actor = await requireActor(req);
+    await d.requireAgentAdmin(actor, req.params.id);
+    return { ended: await endRunById(req.params.run, actor.name) };
+  });
   route(app, 'POST', '/api/agents/:id/keys', {
     section: 'Agents',
     summary: 'create another API key for an agent (admins); returned once',

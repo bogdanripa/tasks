@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
-import { Avatar, ErrorNote, KindBadge, Modal, useFetch } from '../ui';
+import { Avatar, ErrorNote, KindBadge, Modal, SkillChip, useFetch } from '../ui';
 
 export default function OrgPage() {
   const { org } = useParams();
@@ -74,6 +74,7 @@ export default function OrgPage() {
                 <Avatar name={m.name} kind="agent" />
                 {admin ? <Link to={`/agents/${m.id}`}>{m.name}</Link> : <span>{m.name}</span>}
                 <KindBadge kind="agent" />
+                {m.skills?.map((sk: string) => <SkillChip key={sk} skill={sk} />)}
                 {!m.connected && <NotConnected agent={m} admin={admin} />}
               </li>
             ))}

@@ -176,7 +176,8 @@ await api('PATCH', `/api/orgs/${org}`, { guidelines: 'Be kind to the Pi.' });
 assert.equal((await api('GET', `/api/items/${opsRoot.ref}`)).project.guidelines, 'Run the smoke test before Done.');
 
 // Backlog is parked: assigning there doesn't start a run; moving it out does.
-const parkedTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Someday: tidy crontab', assignee: rAgent.agent.id });
+const parkedTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Someday: tidy crontab', assignee: rAgent.agent.id, status: 'Backlog' });
+assert.equal((await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'No status given' })).status, 'Todo', 'new items skip Backlog by default');
 await api('POST', `/api/comments/${parkedTask.ref}`, { body: 'no rush' });
 await new Promise((r) => setTimeout(r, 2500));
 assert.equal(fires.length, 0, 'no run for an item in Backlog');
@@ -186,7 +187,8 @@ await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Todo' });
 await waitFor(() => fires.length === 1, 'run once the item leaves Backlog');
 assert.match(fires[0].text, /moved it from Backlog to Todo/);
 // The payload tells the agent to move it to the working column first; doing so doesn't end the run.
-assert.match(fires[0].text, /Move the task to "In progress" first.*PATCH \/api\/items\/\S+ \{"status":"In progress"\}/);
+assert.match(fires[0].text, /Move the task to "In progress" first.*\n\s+curl -s -X PATCH .* -d '\{"status":"In progress"\}' \$TASKS\/api\/items\//);
+assert.ok(fires[0].text.indexOf('export TASKS=') < fires[0].text.indexOf('How to work'), 'setup comes first');
 assert.match(fires[0].text, /Project guidelines \(Website\):\nRun the smoke test before Done\./);
 assert.match(fires[0].text, /Organization guidelines:\nBe kind to the Pi\./);
 assert.match(fires[0].text, /hard limits win, then the project guidelines, then the organization guidelines/);
@@ -319,6 +321,37 @@ await waitFor(() => fires.length === 9, 'DoD run');
 assert.match(fires[8].text, /ALL TASKS UNDER THIS ISSUE ARE DONE\. This run is the definition-of-done check/);
 await api('POST', '/api/runs/end', {}, tokenOf(fires[8].text));
 console.log('✓ explicit run end; the last task finishing starts the owner’s definition-of-done run');
+
+// Work an agent gives itself wakes it after its current run; a pile of long comments stays under the payload limit.
+const selfIssue = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Self-planned work', status: 'Todo', assignee: rAgent.agent.id });
+await waitFor(() => fires.length === 10, 'run on the self-planned issue');
+const selfTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: selfIssue.ref, title: 'Do part one', assignee: rAgent.agent.id }, tokenOf(fires[9].text));
+for (let i = 0; i < 20; i++) await api('POST', `/api/comments/${selfTask.ref}`, { body: `note ${i}: ` + 'y'.repeat(3900) });
+await api('POST', '/api/runs/end', {}, tokenOf(fires[9].text));
+await waitFor(() => fires.length === 11, 'run for the self-assigned task');
+assert.match(fires[10].text, new RegExp(`Task: ${selfTask.ref}`));
+assert.match(fires[10].text, /assigned it to you/);
+assert.match(fires[10].text, /shortened; read it in full on the task/);
+assert.equal((fires[10].text.match(/note \d+:/g) ?? []).length, 20, 'every comment kept, shortened');
+assert.ok(fires[10].text.length <= 60_000, `payload ${fires[10].text.length} chars`);
+console.log('✓ self-assigned work wakes the agent after its run; payload capped at', fires[10].text.length, 'chars');
+
+// A run that never reaches Tasks (e.g. network allowlist) is released after 10 minutes, with a hint.
+await db`update agent_runs set created_at = now() - interval '11 minutes' where finished_at is null and agent_id = ${rAgent.agent.id}`;
+await api('POST', `/api/comments/${opsRoot.ref}`, { body: 'nudge the worker' });
+let released: any;
+for (let i = 0; i < 40 && !released?.finishedAt; i++) {
+  await new Promise((r) => setTimeout(r, 100));
+  released = (await api('GET', `/api/agents/${rAgent.agent.id}`)).runs.find((r: any) => r.itemRef === selfTask.ref);
+}
+assert.match(released.error, /never reached Tasks.*Network access/);
+await assert.rejects(api('GET', '/api/me', undefined, tokenOf(fires[10].text)), /401/);
+// An admin can end a stuck run by hand.
+const stuck = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Stuck one', status: 'Todo', assignee: rAgent.agent.id });
+await waitFor(() => fires.length === 12, 'run to end by hand');
+const stuckRun = (await api('GET', `/api/agents/${rAgent.agent.id}`)).runs.find((r: any) => r.itemRef === stuck.ref);
+assert.deepEqual(await api('POST', `/api/agents/${rAgent.agent.id}/runs/${stuckRun.id}/end`, {}), { ended: true });
+console.log('✓ runs that never reach Tasks are released with a hint; admins can end a run by hand');
 
 // Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);

@@ -38,6 +38,7 @@ Every code change is reviewed by someone other than its author. When a builder m
 
 ### Delivery
 - When the issue passes the product check: **open a pull request from `feature/<KEY-N>` to `main`** and link it on the issue. *(Or, if this project merges directly: merge `feature/<KEY-N>` into `main` and say so on the issue.)*
+- If this project is deployed (say where below), deploy what was merged and put the **live URL** in the closing comment, after checking it works.
 
 ### Definition of done
 - Acceptance criteria in the spec are met and checked by `qa`.

@@ -130,7 +130,7 @@ export default function Board() {
                   );
                 })()}
               </div>
-              {ci === 0 && <QuickAdd org={org!} projectKey={key!} status={status} onAdded={reload} />}
+              {!last && <QuickAdd org={org!} projectKey={key!} status={status} onAdded={reload} />}
             </section>
           );
         })}

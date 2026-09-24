@@ -4,7 +4,7 @@ import { sql, bus } from './db.js';
 import { config } from './config.js';
 import type { Actor } from './auth.js';
 import { inbox } from './domain.js';
-import { processRoutineQueue, type Pending } from './routine.js';
+import { processRoutineQueue, sweepStaleRuns, type Pending } from './routine.js';
 
 const MAX_ATTEMPTS = 8;
 const BATCH = 20;
@@ -114,6 +114,7 @@ export function startDeliveryWorker() {
     }
     running = true;
     try {
+      await sweepStaleRuns(); // release runs that crashed or never reached Tasks before looking at queues
       do {
         again = false;
         while ((await deliverDue()) === BATCH);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
-import { CopyField, EditableMarkdown, ErrorNote, Modal, Time, RefLink, useFetch } from '../ui';
+import { CopyField, EditableMarkdown, ErrorNote, Modal, SkillsEditor, Tabs, Time, RefLink, useFetch, useTab } from '../ui';
 
 export function McpInstructions({ apiKey }: { apiKey: string }) {
   const url = `${location.origin}/mcp`;
@@ -34,6 +34,7 @@ export function AgentKeyReveal({ apiKey, webhookSecret }: { apiKey: string; webh
 }
 
 type Mode = 'routine' | 'webhook' | 'poll';
+const AGENT_TABS = ['profile', 'connection', 'activity', 'keys'] as const;
 
 export default function AgentPage() {
   const { id } = useParams();
@@ -41,6 +42,7 @@ export default function AgentPage() {
   const [mode, setMode] = useState<Mode | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [tab, setTab] = useTab(AGENT_TABS);
   const navigate = useNavigate();
 
   // Queue and runs change while agents work.
@@ -56,7 +58,11 @@ export default function AgentPage() {
   const shown = mode ?? current;
 
   return (
-    <div className="page narrow">
+    <div className="page narrow settings">
+      <nav className="crumbs">
+        <Link to={`/${agent.orgSlug}/settings?tab=agents`}>Agents</Link>
+        <span className="sep">›</span>
+      </nav>
       {renaming === null ? (
         <h1 onClick={() => setRenaming(agent.name)} title="Click to rename" style={{ cursor: 'text' }}>
           {agent.name} <span className="badge agent">agent</span>
@@ -80,7 +86,14 @@ export default function AgentPage() {
           <button type="button" className="ghost" onClick={() => setRenaming(null)}>Cancel</button>
         </form>
       )}
+      <Tabs
+        tabs={AGENT_TABS}
+        labels={{ profile: 'Profile', connection: current === 'poll' ? 'Connection' : `Connection ✓`, activity: 'Activity', keys: 'API keys' }}
+        current={tab}
+        onSelect={setTab}
+      />
 
+      {tab === 'profile' && (
       <section>
         <h2>Role</h2>
         <p className="muted small">What this agent does and what it must never do without a human’s approval. Filled into its routine Instructions below.</p>
@@ -90,7 +103,26 @@ export default function AgentPage() {
           onSave={async (description) => { await api('PATCH', `/api/agents/${id}`, { description }); reload(); }}
         />
       </section>
+      )}
+      {tab === 'profile' && (
+      <section>
+        <h2>Skills</h2>
+        <p className="muted small">
+          How work reaches this agent: unassigned items that need one of these skills (or sit in a column whose default skill is one of them)
+          go to the least busy member who has it. A review column hands tasks to members with its skill.
+        </p>
+        <SkillsEditor
+          value={agent.skills ?? []}
+          suggestions={agent.skillSuggestions ?? []}
+          onSave={async (skills) => {
+            await api('PATCH', `/api/orgs/${agent.orgSlug}/members/${agent.id}`, { skills });
+            reload();
+          }}
+        />
+      </section>
+      )}
 
+      {tab === 'connection' && (
       <section>
         <h2>How this agent gets work</h2>
         <div className="segmented" role="tablist">
@@ -121,8 +153,9 @@ export default function AgentPage() {
           </div>
         )}
       </section>
+      )}
 
-      {current === 'routine' && (
+      {tab === 'activity' && current === 'routine' && (
         <section>
           <h2>Runs</h2>
           {pause && <p className="warn">Routine runs in this organization are paused until {new Date(pause.until).toLocaleTimeString()} (Anthropic rate limit). Updates keep queuing.</p>}
@@ -139,6 +172,19 @@ export default function AgentPage() {
                 {r.itemRef && <RefLink refStr={r.itemRef} />}
                 <span className="grow muted small">{r.error ?? r.reasons.map((x: string) => x.replace(/_/g, ' ')).join(', ')}</span>
                 {r.sessionUrl && <a href={r.sessionUrl} target="_blank" rel="noreferrer" className="small">session ↗</a>}
+                {r.status === 'fired' && !r.finishedAt && (
+                  <button
+                    className="ghost small danger"
+                    title="Release the agent so its next queued update can start"
+                    onClick={async () => {
+                      if (!confirm('End this run? Its token stops working and the agent’s next queued update starts.')) return;
+                      await api('POST', `/api/agents/${id}/runs/${r.id}/end`);
+                      reload();
+                    }}
+                  >
+                    End run
+                  </button>
+                )}
                 <Time iso={r.createdAt} />
               </li>
             ))}
@@ -146,6 +192,7 @@ export default function AgentPage() {
         </section>
       )}
 
+      {tab === 'keys' && (
       <section>
         <div className="section-head">
           <h2>API keys</h2>
@@ -181,7 +228,9 @@ export default function AgentPage() {
           ))}
         </ul>
       </section>
+      )}
 
+      {tab === 'activity' && (
       <section>
         <h2>Recent notifications</h2>
         {deliveries.length === 0 && <p className="muted">None yet.</p>}
@@ -197,7 +246,9 @@ export default function AgentPage() {
           ))}
         </ul>
       </section>
+      )}
 
+      {tab === 'profile' && (
       <section className="danger-zone">
         <div>
           <h2>Delete agent</h2>
@@ -215,6 +266,7 @@ export default function AgentPage() {
           Delete…
         </button>
       </section>
+      )}
 
       {newKey && (
         <Modal title="New API key" onClose={() => setNewKey(null)}>
@@ -286,9 +338,9 @@ function DeliveryState({ n, mode }: { n: any; mode: Mode }) {
 
 function RunState({ run }: { run: any }) {
   if (run.status === 'failed') return <span className="delivery failed">failed</span>;
+  if (run.finishedAt && run.error) return <span className="delivery failed" title={run.error}>released</span>;
   if (run.finishedAt) return <span className="delivery delivered">done</span>;
-  const last = new Date(run.lastUsedAt ?? run.createdAt).getTime();
-  return Date.now() - last < 20 * 60_000 ? <span className="delivery pending">running</span> : <span className="delivery">timed out</span>;
+  return <span className="delivery pending">running</span>;
 }
 
 function RoutineSetup({ agent, routine, onSaved }: { agent: any; routine: any; onSaved: () => void }) {
