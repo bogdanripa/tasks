@@ -4,6 +4,7 @@ import type { Actor } from './auth.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { encrypt } from './crypto.js';
 import { config } from './config.js';
+import { agentReady, PIPELINE_TEMPLATE, seedStarterAgents } from './starter.js';
 
 export type Role = 'owner' | 'admin' | 'member';
 export type ItemType = 'issue' | 'task';
@@ -221,7 +222,7 @@ export async function listOrgs(actor: Actor) {
     order by o.name`;
 }
 
-export async function createOrg(actor: Actor, input: { slug: string; name: string }) {
+export async function createOrg(actor: Actor, input: { slug: string; name: string; starterAgents?: boolean }) {
   if (actor.kind !== 'human') throw forbidden('Only humans can create organizations');
   return mutate(async (tx) => {
     const [exists] = await tx`select 1 from orgs where slug = ${input.slug}`;
@@ -229,6 +230,7 @@ export async function createOrg(actor: Actor, input: { slug: string; name: strin
     const [org] = await tx`insert into orgs (slug, name) values (${input.slug}, ${input.name}) returning *`;
     await tx`insert into memberships (org_id, account_id, role) values (${org.id}, ${actor.id}, 'owner')`;
     await emit(tx, { orgId: org.id, actorId: actor.id, type: 'org.created', data: { name: org.name } });
+    if (input.starterAgents ?? true) await seedStarterAgents(tx, org.id, actor.id);
     return org;
   });
 }
@@ -244,13 +246,16 @@ export async function orgDetail(actor: Actor, slug: string) {
     sql`
       select a.id, a.kind, a.name, a.email, a.avatar_url, m.role, m.skills,
              case when a.routine_url is not null then 'routine' when a.webhook_url is not null then 'webhook' else 'poll' end as delivery,
+             a.description,
+             (a.routine_url is not null or a.webhook_url is not null
+               or exists (select 1 from api_keys k where k.account_id = a.id and k.revoked_at is null and k.last_used_at is not null)) as connected,
              case when ${org.role !== 'member'} then a.webhook_url end as webhook_url
       from memberships m join accounts a on a.id = m.account_id
       where m.org_id = ${org.id} order by a.kind desc, a.name`,
     org.role === 'member' ? [] : sql`select email, role, created_at from invites where org_id = ${org.id} order by created_at`,
   ]);
   const skills = [...new Set([...SUGGESTED_SKILLS, ...members.flatMap((m: Row) => m.skills)])].sort();
-  return { org, projects, members, invites, skills };
+  return { org, projects, members, invites, skills, agentReady: await agentReady(sql, org.id) };
 }
 
 /**
@@ -404,7 +409,7 @@ function checkRoutineUrl(value: string) {
 export async function updateAgent(
   actor: Actor,
   agentId: string,
-  patch: { name?: string; webhookUrl?: string | null; routineUrl?: string | null; routineToken?: string },
+  patch: { name?: string; description?: string; webhookUrl?: string | null; routineUrl?: string | null; routineToken?: string },
 ) {
   const agent = await requireAgentAdmin(actor, agentId);
   const webhook = patch.webhookUrl === undefined ? undefined : checkWebhook(patch.webhookUrl);
@@ -414,6 +419,7 @@ export async function updateAgent(
   const [row] = await sql`
     update accounts set
       name = coalesce(${patch.name ?? null}, name),
+      description = coalesce(${patch.description ?? null}, description),
       webhook_url = ${webhook === undefined ? sql`webhook_url` : webhook},
       routine_url = ${routine === undefined ? sql`routine_url` : routine},
       routine_token_enc = ${tokenEnc === undefined ? sql`routine_token_enc` : tokenEnc}
@@ -537,8 +543,15 @@ export async function deleteProject(actor: Actor, ref: string, confirm: string) 
   });
 }
 
-export async function createProject(actor: Actor, slug: string, input: { key?: string; name: string; description?: string; columns?: string[] }) {
+export async function createProject(
+  actor: Actor,
+  slug: string,
+  input: { key?: string; name: string; description?: string; columns?: string[]; setup?: 'agents' | 'blank' },
+) {
   const org = await resolveOrg(actor, slug, true);
+  // Set up for the agent team (Todo → product, pipeline guidelines) when the org has one, unless asked not to.
+  const forAgents = input.setup !== 'blank' && !input.columns && (await agentReady(sql, org.id));
+  if (input.setup === 'agents' && !forAgents) throw badRequest('Setting up for agents needs members with product, build (backend/frontend/db) and qa skills');
   let key = input.key?.toUpperCase();
   if (key && RESERVED_KEYS.has(key)) throw badRequest(`"${key}" is reserved; pick another key`);
   if (!key) {
@@ -554,10 +567,11 @@ export async function createProject(actor: Actor, slug: string, input: { key?: s
     const [dupe] = await tx`select 1 from projects where org_id = ${org.id} and key = ${key}`;
     if (dupe) throw badRequest(`Project key ${key} already exists`);
     const [p] = await tx`
-      insert into projects (org_id, key, name, description ${columns ? tx`, columns` : tx``})
-      values (${org.id}, ${key}, ${input.name}, ${input.description ?? ''} ${columns ? tx`, ${columns}` : tx``})
+      insert into projects (org_id, key, name, description, guidelines, column_skills ${columns ? tx`, columns` : tx``})
+      values (${org.id}, ${key}, ${input.name}, ${input.description ?? ''}, ${forAgents ? PIPELINE_TEMPLATE : ''},
+              ${tx.json(forAgents ? { Todo: 'product' } : {})} ${columns ? tx`, ${columns}` : tx``})
       returning *`;
-    await emit(tx, { orgId: org.id, projectId: p.id, actorId: actor.id, type: 'project.created', data: { key, name: p.name } });
+    await emit(tx, { orgId: org.id, projectId: p.id, actorId: actor.id, type: 'project.created', data: { key, name: p.name, setup: forAgents ? 'agents' : 'blank' } });
     return { ...p, orgSlug: org.slug };
   });
 }

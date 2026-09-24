@@ -65,7 +65,7 @@ const waitFor = async (pred: () => boolean, what: string) => {
 await api('POST', '/auth/dev', { email: `alice-${run}@example.com`, name: 'Alice' });
 const aliceCookieForSettings = cookie;
 const org = `acme-${run}`;
-await api('POST', '/api/orgs', { slug: org, name: 'Acme' });
+await api('POST', '/api/orgs', { slug: org, name: 'Acme', starterAgents: false });
 await api('POST', `/api/orgs/${org}/projects`, { key: 'WEB', name: 'Website' });
 await api('POST', `/api/orgs/${org}/projects`, { key: 'API', name: 'Backend' });
 // Keys default to the first three letters of the name, taking the next free variant on collision.
@@ -478,9 +478,33 @@ assert.doesNotMatch(help, /\(undocumented\)/, 'every /api route has docs');
 assert.match(help, /PATCH \/api\/items\/\{ref\}\n.*\n.*\n  body:\n(.*\n)*?    status\?: string/);
 console.log('✓ /api/help generated from routes:', help.split('\n').filter((l) => /^(GET|POST|PATCH|DELETE) /.test(l)).length, 'endpoints; payload', fires[0].text.length, 'chars');
 
+// Starter setup: a new org gets a PM, Dev and QA; its projects are set up for them.
+const starter = `start-${run}`;
+await api('POST', '/api/orgs', { slug: starter, name: 'Starter' });
+const sOrg = await api('GET', `/api/orgs/${starter}`);
+const sAgents = Object.fromEntries(sOrg.members.filter((m: any) => m.kind === 'agent').map((m: any) => [m.name, m]));
+assert.deepEqual(Object.keys(sAgents).sort(), ['Dev', 'PM', 'QA']);
+assert.deepEqual(sAgents.PM.skills, ['product']);
+assert.deepEqual(sAgents.QA.skills, ['qa']);
+assert.ok(sAgents.Dev.skills.includes('backend') && sAgents.PM.description.startsWith('You are the product manager'));
+assert.equal(sOrg.agentReady, true);
+assert.equal(sAgents.PM.connected, false, 'not connected until it has a routine, webhook or used key');
+const sProj = await api('POST', `/api/orgs/${starter}/projects`, { name: 'App' });
+assert.deepEqual(sProj.columnSkills, { Todo: 'product' });
+assert.match(sProj.guidelines, /## How work flows here/);
+const sIssue = await api('POST', `/api/projects/${starter}/APP/items`, { type: 'issue', title: 'Dark mode', status: 'Todo' });
+assert.equal(sIssue.assigneeName, 'PM');
+const pmView = await api('GET', `/api/agents/${sAgents.PM.id}`);
+assert.match(pmView.routine.instructions, /Your role and hard limits:\nYou are the product manager/);
+const blank = await api('POST', `/api/orgs/${starter}/projects`, { name: 'Scratch', setup: 'blank' });
+assert.deepEqual(blank.columnSkills, {});
+assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: 'Plain' })).guidelines, '', 'orgs without product+build+qa get blank projects');
+await api('DELETE', `/api/orgs/${starter}`, { confirm: starter });
+console.log('✓ starter setup: new org gets PM/Dev/QA; its projects route Todo to the PM and start from the pipeline guidelines');
+
 // Deleting an org: owner + typed slug; cascades, cleans up cross-org links, revokes its agents.
 const other = `other-${run}`;
-await api('POST', '/api/orgs', { slug: other, name: 'Other' });
+await api('POST', '/api/orgs', { slug: other, name: 'Other', starterAgents: false });
 await api('POST', `/api/orgs/${other}/projects`, { key: 'OPS', name: 'Ops' });
 const opsIssue = await api('POST', `/api/projects/${other}/OPS/items`, { type: 'issue', title: 'Rotate certs', triggeredBy: task.ref });
 assert.equal((await api('GET', `/api/items/${opsIssue.ref}`)).links.length, 1);

@@ -5,7 +5,8 @@ import { mintApiKey, requireActor } from './auth.js';
 import { badRequest } from './errors.js';
 import * as d from './domain.js';
 import { config } from './config.js';
-import { ROUTINE_INSTRUCTIONS } from './routine.js';
+import { routineInstructions } from './routine.js';
+import { PIPELINE_TEMPLATE } from './starter.js';
 import { fullReference, route } from './apidoc.js';
 import * as sched from './schedules.js';
 
@@ -56,7 +57,11 @@ export function apiRoutes(app: FastifyInstance) {
   route(app, 'POST', '/api/orgs', {
     section: 'Organizations',
     summary: 'create an organization (humans only); you become its owner',
-    body: z.object({ slug, name: z.string().min(1).max(80) }),
+    body: z.object({
+      slug,
+      name: z.string().min(1).max(80),
+      starterAgents: z.boolean().optional().describe('add a PM, Dev and QA agent with skills (default true)'),
+    }),
   }, async (req, { body }) => d.createOrg(await requireActor(req), body));
   route(app, 'GET', '/api/orgs/:org', {
     section: 'Organizations',
@@ -141,13 +146,14 @@ export function apiRoutes(app: FastifyInstance) {
         webhookSecret: agent.webhookSecret,
         routineUrl: agent.routineUrl,
         hasRoutineToken: !!agent.routineTokenEnc,
+        description: agent.description,
       },
       keys: await d.listKeys(agent.id),
       deliveries,
       runs,
       queue,
       pause: pause ?? null,
-      routine: { instructions: ROUTINE_INSTRUCTIONS, allowDomain: new URL(config.publicUrl).host },
+      routine: { instructions: routineInstructions(agent.description), allowDomain: new URL(config.publicUrl).host },
     };
   });
   route(app, 'PATCH', '/api/agents/:id', {
@@ -155,6 +161,7 @@ export function apiRoutes(app: FastifyInstance) {
     summary: 'rename an agent or change how it gets work (admins)',
     body: z.object({
       name: z.string().min(1).max(80).optional(),
+      description: z.string().max(4000).optional().describe('the agent’s role and hard limits; fills its routine Instructions'),
       webhookUrl: webhook,
       routineUrl: z.string().max(300).nullable().optional().describe('Claude Code routine /fire URL or routine id; null to remove'),
       routineToken: z.string().min(10).max(500).optional().describe('the routine’s API token; stored encrypted'),
@@ -185,6 +192,7 @@ export function apiRoutes(app: FastifyInstance) {
       key: projectKey.optional().describe('defaults to the first three letters of the name'),
       description: z.string().max(2000).optional(),
       columns: z.array(z.string().max(40)).max(12).optional().describe('board columns in order; the last means done'),
+      setup: z.enum(['agents', 'blank']).optional().describe('agents: Todo routes to product and guidelines start from the agent pipeline (default when the org has product, build and qa skills)'),
     }),
   }, async (req, { body }) => d.createProject(await requireActor(req), req.params.org, body));
   route(app, 'GET', '/api/projects/:org/:key', { section: 'Projects', summary: 'a board: the project and its items', agent: true }, async (req) => {
@@ -335,6 +343,9 @@ export function apiRoutes(app: FastifyInstance) {
     return d.search(await requireActor(req), q);
   });
 
+  route(app, 'GET', '/api/templates/agent-pipeline', { section: 'Reference', summary: 'the agent pipeline project guidelines template (Markdown)' }, async (_req, _input, reply) =>
+    reply.type('text/markdown; charset=utf-8').send(PIPELINE_TEMPLATE),
+  );
   route(app, 'GET', '/api/help', { section: 'Reference', summary: 'this reference, generated from the running server' }, async (_req, _input, reply) =>
     reply.type('text/plain').send(fullReference(config.publicUrl)),
   );

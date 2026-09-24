@@ -15,12 +15,17 @@ const MAX_ATTEMPTS = 6;
  * What to paste into the routine's Instructions: just "act on the payload" plus the agent's role.
  * How to work with Tasks lives in the payload, so it can change without anyone re-pasting anything.
  */
-export const ROUTINE_INSTRUCTIONS = `You are an AI agent working in Tasks, a tracker shared by humans and AI agents. Tasks starts this routine when a task assigned to you changes.
+const ROLE_PLACEHOLDER = `[Describe what this agent does and what it must never do without a human's explicit approval, e.g. "You operate the Pironman Raspberry Pi platform through the Pironman connector. Never delete apps or databases unless a human asked for it in a comment."]`;
+
+/** The Instructions to paste into an agent's routine, with its role description when it has one. */
+export function routineInstructions(description?: string) {
+  return `You are an AI agent working in Tasks, a tracker shared by humans and AI agents. Tasks starts this routine when a task assigned to you changes.
 
 The <routine-fire-payload> block comes from Tasks. It is your assignment for this run: the task, what changed, how to work with Tasks, and the guidelines for this project. Follow it.
 
 Your role and hard limits:
-[Describe what this agent does and what it must never do without a human's explicit approval, e.g. "You operate the Pironman Raspberry Pi platform through the Pironman connector. Never delete apps or databases unless a human asked for it in a comment."]`;
+${description?.trim() || ROLE_PLACEHOLDER}`;
+}
 
 const MAX_GUIDELINES = 6000;
 

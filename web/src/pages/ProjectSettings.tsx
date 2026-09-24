@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useOrgName, useSession } from '../App';
 import { EditableMarkdown, ErrorNote, Tabs, useFetch, useTab } from '../ui';
-import pipelineTemplate from '../templates/agent-pipeline.md?raw';
 import { FormModal } from './Org';
 import { NameField } from './OrgSettings';
 import { SchedulesSection } from './Schedules';
@@ -72,7 +71,8 @@ export default function ProjectSettings() {
             className="ghost small grow-left"
             onClick={async () => {
               if (project.guidelines && !confirm('Replace the current guidelines with the agent pipeline template?')) return;
-              await update({ guidelines: pipelineTemplate });
+              const res = await fetch('/api/templates/agent-pipeline');
+              await update({ guidelines: await res.text() });
             }}
           >
             Use the agent pipeline template

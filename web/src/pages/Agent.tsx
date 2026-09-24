@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
-import { CopyField, ErrorNote, Modal, Time, RefLink, useFetch } from '../ui';
+import { CopyField, EditableMarkdown, ErrorNote, Modal, Time, RefLink, useFetch } from '../ui';
 
 export function McpInstructions({ apiKey }: { apiKey: string }) {
   const url = `${location.origin}/mcp`;
@@ -80,6 +80,16 @@ export default function AgentPage() {
           <button type="button" className="ghost" onClick={() => setRenaming(null)}>Cancel</button>
         </form>
       )}
+
+      <section>
+        <h2>Role</h2>
+        <p className="muted small">What this agent does and what it must never do without a human’s approval. Filled into its routine Instructions below.</p>
+        <EditableMarkdown
+          value={agent.description ?? ''}
+          placeholder="Describe this agent’s role and hard limits…"
+          onSave={async (description) => { await api('PATCH', `/api/agents/${id}`, { description }); reload(); }}
+        />
+      </section>
 
       <section>
         <h2>How this agent gets work</h2>
@@ -297,7 +307,7 @@ function RoutineSetup({ agent, routine, onSaved }: { agent: any; routine: any; o
           At <a href="https://claude.ai/code/routines" target="_blank" rel="noreferrer">claude.ai/code/routines</a>, create a routine for this agent, with the trigger <b>Call via API</b>. Add the connectors it needs for its job.
         </li>
         <li>
-          Paste these Instructions, then replace the last line with this agent’s role:
+          Paste these Instructions (they include the role above; if it’s empty, replace the last line with the agent’s role):
           <pre className="code">{routine.instructions}</pre>
           <CopyField value={routine.instructions} buttonOnly />
         </li>

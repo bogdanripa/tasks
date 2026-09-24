@@ -331,6 +331,11 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .state.ready { color: var(--accent); }
 .state.waiting { color: var(--muted); }
 
+.connect { background: color-mix(in srgb, var(--agent) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--agent) 30%, var(--border)); border-radius: 12px; padding: 16px 18px; }
+.connect h2 { margin-bottom: 4px; }
+.connect p { margin: 0 0 12px; }
+.button.small { padding: 3px 10px; font-size: 12px; }
+
 /* modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal { background: var(--surface); border-radius: 12px; padding: 18px 20px 20px; width: min(560px, 100%); max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgb(0 0 0 / 0.3); }

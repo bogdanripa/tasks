@@ -18,6 +18,7 @@ COPY --from=build /app/package.json ./
 COPY --from=build /app/server/package.json server/
 COPY --from=build /app/server/dist server/dist
 COPY --from=build /app/server/migrations server/migrations
+COPY --from=build /app/server/templates server/templates
 COPY --from=build /app/web/dist web/dist
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --start-interval=250ms \

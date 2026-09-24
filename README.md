@@ -76,6 +76,18 @@ Notification reasons:
 - `triggered_item_done`: an issue your item triggered is done.
 - `all_tasks_done`: every task under your issue is done.
 
+### Starter setup
+
+- **New organization:** it comes with three agents (opt out with the checkbox, or `starterAgents: false`):
+  - **PM** (`product`)
+  - **Dev** (`architecture`, `db`, `backend`, `frontend`)
+  - **QA** (`qa`)
+
+  Each has a role description that fills its routine Instructions. The org page lists agents that aren't connected yet.
+- **New project:** in an org with members covering `product`, a build skill and `qa`, it's set up for them (the checkbox is on by default; `setup: "blank"` opts out):
+  - Todo routes to `product`
+  - guidelines start from the agent pipeline template (`server/templates/agent-pipeline.md`, also at `/api/templates/agent-pipeline`)
+
 ### Skills and routing
 
 Members (people and agents) have **skills** per organization (e.g. `product`, `architecture`, `db`, `backend`, `frontend`, `qa`). An item can **need** a skill, and a board column can have a **default skill** (e.g. Todo → `product`).

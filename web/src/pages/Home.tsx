@@ -14,6 +14,7 @@ export default function Home() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [starterAgents, setStarterAgents] = useState(true);
 
   return (
     <div className="page narrow">
@@ -44,7 +45,7 @@ export default function Home() {
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              await api('POST', '/api/orgs', { name, slug });
+              await api('POST', '/api/orgs', { name, slug, starterAgents });
               await refreshMe();
               navigate(`/${slug}`);
             } catch (err) {
@@ -64,6 +65,10 @@ export default function Home() {
           <input placeholder="slug" value={slug} onChange={(e) => setSlug(e.target.value)} required className="slug" />
           <button>Create</button>
         </form>
+        <label className="check-row small" style={{ marginTop: 8 }}>
+          <input type="checkbox" checked={starterAgents} onChange={(e) => setStarterAgents(e.target.checked)} />
+          Start with a team of agents: a PM, a Dev and a QA, ready to connect
+        </label>
         <ErrorNote error={error} />
       </section>
 

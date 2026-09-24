@@ -37,6 +37,23 @@ export default function OrgPage() {
         </div>
       </div>
 
+      {admin && agents.some((m: any) => !m.connected) && (
+        <section className="connect">
+          <h2>Connect your agents</h2>
+          <p className="muted small">These agents can’t receive work yet. Give each one a Claude Code routine (recommended), a webhook, or an API key for the MCP.</p>
+          <ul className="rows">
+            {agents.filter((m: any) => !m.connected).map((m: any) => (
+              <li key={m.id}>
+                <Avatar name={m.name} kind="agent" />
+                <b>{m.name}</b>
+                <span className="muted small grow">{m.skills?.join(', ')}</span>
+                <Link to={`/agents/${m.id}`} className="button small">Connect</Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <h2>Projects</h2>
         {data.projects.length === 0 && <p className="muted">No projects yet.</p>}
@@ -87,8 +104,11 @@ export default function OrgPage() {
             { name: 'name', label: 'Name', placeholder: 'Website' },
             { name: 'key', label: 'Key', placeholder: 'WEB', hint: 'Prefix for item refs, e.g. WEB-12', optional: true, derive: { from: 'name', fn: defaultProjectKey } },
             { name: 'description', label: 'Description', optional: true },
+            ...(data.agentReady
+              ? [{ name: 'forAgents', label: 'Set up for your agent team', type: 'checkbox', checked: true, hint: 'New issues in Todo go to your product agent, and the guidelines start from the agent pipeline template.' }]
+              : []),
           ]}
-          note="You can set its board columns and agent guidelines in the project’s settings."
+          note="You can change its columns and guidelines in the project’s settings."
           onClose={() => setNewProject(false)}
           onSubmit={async (v) => {
             await api('POST', `/api/orgs/${org}/projects`, {
@@ -96,6 +116,7 @@ export default function OrgPage() {
               // Only send a key the user typed; otherwise the server derives it and avoids collisions.
               key: v.key && v.key.toUpperCase() !== defaultProjectKey(v.name) ? v.key.toUpperCase() : undefined,
               description: v.description || undefined,
+              setup: data.agentReady ? (v.forAgents === 'true' ? 'agents' : 'blank') : undefined,
             });
             reload();
           }}
@@ -112,6 +133,8 @@ type Field = {
   hint?: string;
   optional?: boolean;
   type?: string;
+  /** For type "checkbox": whether it starts checked. Its value is "true" or "false". */
+  checked?: boolean;
   /** Prefill from another field until the user edits this one. */
   derive?: { from: string; fn: (value: string) => string };
 };
@@ -131,7 +154,9 @@ export function FormModal(props: {
   onClose: () => void;
   onSubmit: (values: Record<string, string>) => Promise<void>;
 }) {
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(props.fields.filter((f) => f.type === 'checkbox').map((f) => [f.name, String(!!f.checked)])),
+  );
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const change = (name: string, value: string) => {
     const next = { ...values, [name]: value };
@@ -157,7 +182,12 @@ export function FormModal(props: {
           }
         }}
       >
-        {props.fields.map((f, i) => (
+        {props.fields.map((f, i) => f.type === 'checkbox' ? (
+          <label key={f.name} className="check-row">
+            <input type="checkbox" checked={values[f.name] === 'true'} onChange={(e) => setValues({ ...values, [f.name]: String(e.target.checked) })} />
+            <span>{f.label}{f.hint && <span className="hint"> {f.hint}</span>}</span>
+          </label>
+        ) : (
           <label key={f.name}>
             <span>
               {f.label}
