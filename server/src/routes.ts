@@ -134,21 +134,37 @@ export function apiRoutes(app: FastifyInstance) {
   route(app, 'GET', '/api/orgs/:org/github', { section: 'GitHub', summary: 'whether the org has the Tasks GitHub App installed, and which repositories it can reach' }, async (req) =>
     github.orgGithub(await requireActor(req), req.params.org),
   );
-  route(app, 'GET', '/api/orgs/:org/github/install', { section: 'GitHub', summary: 'start installing the Tasks GitHub App for this org (admins; redirects to GitHub)' }, async (req, _input, reply) => {
-    const { url, cookie } = await github.installStart(await requireActor(req), req.params.org);
+  route(app, 'GET', '/api/orgs/:org/github/install', {
+    section: 'GitHub',
+    summary: 'connect GitHub (admins; redirects to GitHub): install the app, or with existing=1 sign in and use an installation the app already has',
+    query: z.object({ existing: z.string().optional() }),
+  }, async (req, { query }, reply) => {
+    const { url, cookie } = await github.installStart(await requireActor(req), req.params.org, query.existing === '1');
     reply.setCookie(cookie.name, cookie.value, { path: '/api/github', httpOnly: true, sameSite: 'lax', secure: config.production, maxAge: 900 });
     return reply.redirect(url);
   });
   route(app, 'GET', '/api/github/callback', {
     section: 'GitHub',
-    summary: 'where GitHub returns after installing the app (links the installation to the org)',
-    query: z.object({ code: z.string().optional(), installation_id: z.string().optional(), setup_action: z.string().optional() }),
+    summary: 'where GitHub returns after installing the app or signing in (links the installation to the org)',
+    query: z.object({ code: z.string().optional(), installation_id: z.string().optional(), setup_action: z.string().optional(), state: z.string().optional() }),
   }, async (req, { query }, reply) => {
     const actor = await requireActor(req);
     try {
-      const slug = await github.installCallback(actor, query, req.cookies.gh_install);
+      const { slug, choices } = await github.installCallback(actor, query, req.cookies.gh_install);
       reply.clearCookie('gh_install', { path: '/api/github' });
-      return reply.redirect(`/app/${slug}/settings?tab=github`);
+      const pick = choices ? `&gh_pick=${Buffer.from(JSON.stringify(choices)).toString('base64url')}` : '';
+      return reply.redirect(`/app/${slug}/settings?tab=github${pick}`);
+    } catch (e) {
+      return reply.redirect(`/app/?github_error=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+  route(app, 'GET', '/api/github/pick', {
+    section: 'GitHub',
+    summary: 'link one of your GitHub installations to the org (a signed link from the callback)',
+    query: z.object({ org: z.string(), inst: z.string(), login: z.string(), type: z.string(), exp: z.string(), sig: z.string() }),
+  }, async (req, { query }, reply) => {
+    try {
+      return reply.redirect(`/app/${await github.pickInstallation(await requireActor(req), query)}/settings?tab=github`);
     } catch (e) {
       return reply.redirect(`/app/?github_error=${encodeURIComponent((e as Error).message)}`);
     }

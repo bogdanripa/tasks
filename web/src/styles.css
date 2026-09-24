@@ -408,3 +408,6 @@ pre.code { background: var(--surface-2); padding: 10px; border-radius: 6px; over
 .agent-row .agent-skills { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .agent-row .agent-end { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
 .agent-row .not-connected { margin-left: 0; }
+.github-connect { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.github-connect p { margin: 6px 0 0; }
+@media (max-width: 640px) { .github-connect { grid-template-columns: 1fr; } }

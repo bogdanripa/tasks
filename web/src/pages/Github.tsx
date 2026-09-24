@@ -22,16 +22,48 @@ export function GithubSection({ org }: { org: string }) {
   if (!data.configured) return <p className="muted">GitHub isn’t configured on this server (the GitHub App’s credentials are missing).</p>;
 
   const install = `/api/orgs/${org}/github/install`;
+  const picks: { login: string; type: string; link: string }[] = (() => {
+    try {
+      const raw = new URLSearchParams(location.search).get('gh_pick');
+      return raw ? JSON.parse(atob(raw.replace(/-/g, '+').replace(/_/g, '/'))) : [];
+    } catch {
+      return [];
+    }
+  })();
   if (!data.connected) {
     return (
       <div className="stack">
         <p className="muted small">
-          Install the Tasks GitHub App on your GitHub account or organization and choose the repositories agents may work on. Then pick a
-          repository in each project’s settings. Every agent run gets a token limited to that one repository, valid for an hour.
+          Connect the Tasks GitHub App and choose the repositories agents may work on. Then pick a repository in each project’s settings.
+          Every agent run gets a token limited to that one repository, valid for an hour.
         </p>
-        <div>
-          <a className="button primary" href={install}>Connect GitHub</a>
-        </div>
+        {picks.length > 0 ? (
+          <div className="stack">
+            <b>Which installation should this organization use?</b>
+            <ul className="rows">
+              {picks.map((p) => (
+                <li key={p.link}>
+                  <b>{p.login}</b> <span className="muted small grow">{p.type === 'Organization' ? 'GitHub organization' : 'GitHub account'}</span>
+                  <a className="button small primary" href={p.link}>Use this one</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="github-connect">
+            <div>
+              <a className="button primary" href={install}>Install on GitHub</a>
+              <p className="muted small">For a GitHub account or organization that doesn’t have the Tasks app yet.</p>
+            </div>
+            <div>
+              <a className="button" href={`${install}?existing=1`}>Use an existing installation</a>
+              <p className="muted small">
+                The app is already installed (for example, for another Tasks organization). GitHub allows one installation per account, so
+                sign in with GitHub and use it here too.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

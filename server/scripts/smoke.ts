@@ -546,8 +546,11 @@ const ghServer = http.createServer((req, res) => {
     ghCalls.push(`${req.method} ${p}`);
     if (req.method === 'POST' && /^\/app\/installations\/777\/access_tokens$/.test(p)) { tokenRequests.push(b); return send(201, { token: `ghs_run${tokenRequests.length}`, expires_at: new Date(Date.now() + 3600_000).toISOString() }); }
     if (p === '/installation/repositories') return send(200, { repositories: [{ full_name: 'octo/pong' }, { full_name: 'octo/fresh' }] });
-    if (p === '/login/oauth/access_token') return send(200, b.code === 'good' ? { access_token: 'gho_user' } : { error: 'bad_verification_code' });
-    if (p === '/user/installations') return send(200, { installations: [{ id: 777, account: { login: 'octo', type: 'User' } }] });
+    if (p === '/login/oauth/access_token') return send(200, b.code === 'good' ? { access_token: 'gho_user' } : b.code === 'multi' ? { access_token: 'gho_multi' } : { error: 'bad_verification_code' });
+    if (p === '/user/installations') {
+      const octo = { id: 777, account: { login: 'octo', type: 'User' } };
+      return send(200, { installations: req.headers.authorization === 'Bearer gho_multi' ? [octo, { id: 888, account: { login: 'octo-org', type: 'Organization' } }] : [octo] });
+    }
     const m = /^\/repos\/octo\/(pong|fresh)(\/.*)?$/.exec(p);
     if (!m) return send(404, { message: 'Not Found' });
     const files = repos[m[1]];
@@ -581,12 +584,28 @@ await new Promise<void>((r) => ghServer.listen(4559, r));
 assert.deepEqual(await api('GET', `/api/orgs/${org}/github`), { configured: true, connected: false });
 const installStart = await fetch(`${BASE}/api/orgs/${org}/github/install`, { headers: { cookie }, redirect: 'manual' });
 assert.equal(installStart.status, 302);
-assert.match(installStart.headers.get('location')!, /\/apps\/tasks-test\/installations\/new$/);
+assert.match(installStart.headers.get('location')!, /\/apps\/tasks-test\/installations\/new\?state=\w+$/);
 const installCookie = /gh_install=[^;]+/.exec(installStart.headers.get('set-cookie')!)![0];
 const callback = (qs: string, c = `${cookie}; ${installCookie}`) => fetch(`${BASE}/api/github/callback?${qs}`, { headers: { cookie: c }, redirect: 'manual' }).then((r) => r.headers.get('location')!);
 assert.match(await callback('code=good&installation_id=999&setup_action=install'), /github_error=.*isn%E2%80%99t%20one%20your%20GitHub%20account/, 'someone else’s installation id is refused');
 assert.match(await callback('code=good&installation_id=777', cookie), /github_error=.*expired%20or%20was%20started/, 'no install cookie, no link');
 assert.equal(await callback('code=good&installation_id=777&setup_action=install'), `/app/${org}/settings?tab=github`);
+// A second Tasks org uses the same installation (an account installs an app once): sign in and pick it.
+const org2 = `gh2-${run}`;
+await api('POST', '/api/orgs', { slug: org2, name: 'GH2', starterAgents: false });
+const existingStart = await fetch(`${BASE}/api/orgs/${org2}/github/install?existing=1`, { headers: { cookie }, redirect: 'manual' });
+assert.match(existingStart.headers.get('location')!, /\/login\/oauth\/authorize\?client_id=.*&state=(\w+)$/);
+const existingState = /state=(\w+)$/.exec(existingStart.headers.get('location')!)![1];
+const existingCookie = /gh_install=[^;]+/.exec(existingStart.headers.get('set-cookie')!)![0];
+assert.match(await callback(`code=multi&state=wrong`, `${cookie}; ${existingCookie}`), /github_error=.*expired/, 'state must match');
+const picked = await callback(`code=multi&state=${existingState}`, `${cookie}; ${existingCookie}`);
+const choices = JSON.parse(Buffer.from(/gh_pick=([\w-]+)/.exec(picked)![1], 'base64url').toString());
+assert.deepEqual(choices.map((c: any) => c.login), ['octo', 'octo-org']);
+const forged = choices[1].link.replace('inst=888', 'inst=999');
+const follow = (link: string) => fetch(`${BASE}${link}`, { headers: { cookie }, redirect: 'manual' }).then((r) => r.headers.get('location')!);
+assert.match(await follow(forged), /github_error=.*expired/, 'a pick link can’t be edited');
+assert.equal(await follow(choices[0].link), `/app/${org2}/settings?tab=github`);
+assert.equal((await api('GET', `/api/orgs/${org2}/github`)).account, 'octo');
 const ghState = await api('GET', `/api/orgs/${org}/github`);
 assert.equal(ghState.account, 'octo');
 assert.deepEqual(ghState.repos, ['octo/fresh', 'octo/pong']);

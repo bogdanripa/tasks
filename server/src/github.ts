@@ -56,43 +56,94 @@ export async function installationToken(installationId: number | string, repo?: 
 const STATE_COOKIE = 'gh_install';
 const sign = (v: string) => createHmac('sha256', config.secretsKey).update(v).digest('base64url');
 
-/** Where to send an admin to install the app; the cookie ties the callback back to this org and person. */
-export async function installStart(actor: Actor, slug: string) {
+/**
+ * Where to send an admin: GitHub's install page, or (existing) GitHub sign-in to pick an installation the app
+ * already has, since an account can install an app only once (e.g. it's already used by another Tasks org).
+ * The cookie ties the callback back to this org and person.
+ */
+export async function installStart(actor: Actor, slug: string, existing = false) {
   if (!githubConfigured()) throw badRequest('GitHub isn’t configured on this server');
   const org = await resolveOrg(actor, slug, true);
-  const payload = `${org.id}.${actor.id}.${Date.now() + 15 * 60_000}.${randomBytes(8).toString('hex')}`;
-  return { url: `${gh.webBase}/apps/${gh.appSlug}/installations/new`, cookie: { name: STATE_COOKIE, value: `${payload}.${sign(payload)}` } };
+  const nonce = randomBytes(8).toString('hex');
+  const payload = `${org.id}.${actor.id}.${Date.now() + 15 * 60_000}.${nonce}`;
+  const url = existing
+    ? `${gh.webBase}/login/oauth/authorize?client_id=${encodeURIComponent(gh.clientId)}&redirect_uri=${encodeURIComponent(`${config.publicUrl}/api/github/callback`)}&state=${nonce}`
+    : `${gh.webBase}/apps/${gh.appSlug}/installations/new?state=${nonce}`;
+  return { url, cookie: { name: STATE_COOKIE, value: `${payload}.${sign(payload)}` } };
 }
 
+type Installation = { id: number; account: { login: string; type: string } };
+
+async function linkInstallation(orgId: string, actor: Actor, inst: Installation) {
+  await sql`
+    insert into org_github (org_id, installation_id, account_login, account_type, installed_by)
+    values (${orgId}, ${inst.id}, ${inst.account.login}, ${inst.account.type}, ${actor.id})
+    on conflict (org_id) do update set installation_id = excluded.installation_id, account_login = excluded.account_login,
+      account_type = excluded.account_type, installed_by = excluded.installed_by, created_at = now()`;
+  await recordEvent({ orgId, actorId: actor.id, type: 'github.connected', data: { account: inst.account.login } });
+}
+
+/** A signed, short-lived link that links one installation (already checked for this person) to one org. */
+const pickSig = (orgId: string, actorId: string, inst: Installation, exp: number) =>
+  sign(`pick.${orgId}.${actorId}.${inst.id}.${inst.account.login}.${inst.account.type}.${exp}`);
+
 /**
- * GitHub sends the admin back with an installation id and an OAuth code. The installation is only linked
- * after checking, with the admin's own GitHub token, that they can access it; ids alone prove nothing.
+ * GitHub sends the admin back with an OAuth code (and, after installing, an installation id). An installation
+ * is only linked after checking, with the admin's own GitHub token, that they can access it; ids alone prove
+ * nothing. Without an installation id, the admin picks one of theirs (linked directly when there's one).
  */
-export async function installCallback(actor: Actor, q: { code?: string; installation_id?: string; setup_action?: string }, cookie?: string) {
+export async function installCallback(
+  actor: Actor,
+  q: { code?: string; installation_id?: string; setup_action?: string; state?: string },
+  cookie?: string,
+): Promise<{ slug: string; choices?: { login: string; type: string; link: string }[] }> {
   const parts = cookie?.split('.') ?? [];
-  const [orgId, actorId, exp] = parts;
+  const [orgId, actorId, exp, nonce] = parts;
   const payload = parts.slice(0, 4).join('.');
-  if (parts.length !== 5 || sign(payload) !== parts[4] || actorId !== actor.id || Number(exp) < Date.now()) {
-    throw badRequest('This GitHub installation link expired or was started by someone else. Start again from Settings → GitHub.');
+  if (parts.length !== 5 || sign(payload) !== parts[4] || actorId !== actor.id || Number(exp) < Date.now() || (q.state && q.state !== nonce)) {
+    throw badRequest('This GitHub link expired or was started by someone else. Start again from Settings → GitHub.');
   }
   if ((await orgRole(actor.id, orgId)) === 'member' || !(await orgRole(actor.id, orgId))) throw badRequest('Only an admin can connect GitHub');
-  if (!q.code || !q.installation_id) throw badRequest('GitHub didn’t return an installation (was it cancelled?)');
+  if (!q.code) throw badRequest('GitHub didn’t return a sign-in (was it cancelled?)');
   const tokenRes = await fetch(`${gh.webBase}/login/oauth/access_token`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     body: JSON.stringify({ client_id: gh.clientId, client_secret: gh.clientSecret, code: q.code }),
   }).then((r) => r.json() as any);
   if (!tokenRes.access_token) throw badRequest(`GitHub sign-in failed: ${tokenRes.error_description ?? tokenRes.error ?? 'no token'}`);
-  const mine = await ghFetch('/user/installations?per_page=100', { token: tokenRes.access_token });
-  const inst = mine.installations.find((i: any) => String(i.id) === String(q.installation_id));
-  if (!inst) throw badRequest('That GitHub installation isn’t one your GitHub account can access');
-  await sql`
-    insert into org_github (org_id, installation_id, account_login, account_type, installed_by)
-    values (${orgId}, ${inst.id}, ${inst.account.login}, ${inst.account.type}, ${actor.id})
-    on conflict (org_id) do update set installation_id = excluded.installation_id, account_login = excluded.account_login,
-      account_type = excluded.account_type, installed_by = excluded.installed_by, created_at = now()`;
+  const mine: Installation[] = (await ghFetch('/user/installations?per_page=100', { token: tokenRes.access_token })).installations;
   const [org] = await sql`select slug from orgs where id = ${orgId}`;
-  await recordEvent({ orgId, actorId: actor.id, type: 'github.connected', data: { account: inst.account.login } });
+  if (q.installation_id) {
+    const inst = mine.find((i) => String(i.id) === String(q.installation_id));
+    if (!inst) throw badRequest('That GitHub installation isn’t one your GitHub account can access');
+    await linkInstallation(orgId, actor, inst);
+    return { slug: org.slug };
+  }
+  if (!mine.length) throw badRequest('Your GitHub account can’t access any installation of the Tasks app yet. Use “Install on GitHub” instead.');
+  if (mine.length === 1) {
+    await linkInstallation(orgId, actor, mine[0]);
+    return { slug: org.slug };
+  }
+  const until = Date.now() + 15 * 60_000;
+  return {
+    slug: org.slug,
+    choices: mine.map((i) => ({
+      login: i.account.login,
+      type: i.account.type,
+      link: `/api/github/pick?${new URLSearchParams({ org: orgId, inst: String(i.id), login: i.account.login, type: i.account.type, exp: String(until), sig: pickSig(orgId, actor.id, i, until) })}`,
+    })),
+  };
+}
+
+/** Follow a signed choice from installCallback. */
+export async function pickInstallation(actor: Actor, q: { org: string; inst: string; login: string; type: string; exp: string; sig: string }) {
+  const inst = { id: Number(q.inst), account: { login: q.login, type: q.type } };
+  if (!['owner', 'admin'].includes((await orgRole(actor.id, q.org)) ?? '')) throw badRequest('Only an admin can connect GitHub');
+  if (Number(q.exp) < Date.now() || pickSig(q.org, actor.id, inst, Number(q.exp)) !== q.sig) {
+    throw badRequest('This GitHub link expired or was started by someone else. Start again from Settings → GitHub.');
+  }
+  await linkInstallation(q.org, actor, inst);
+  const [org] = await sql`select slug from orgs where id = ${q.org}`;
   return org.slug as string;
 }
 
