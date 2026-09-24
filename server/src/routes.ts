@@ -34,12 +34,18 @@ export function apiRoutes(app: FastifyInstance) {
     const actor = await requireActor(req);
     return d.assignedTo(actor, actor.id);
   });
+  route(app, 'GET', '/api/work', {
+    section: 'You',
+    summary: 'open work across your projects by assignee (me, agents, humans, unassigned, all, or a member id), with the members you can pick',
+    query: z.object({ assignee: z.string().max(64).optional() }),
+    agent: true,
+  }, async (req, { query }) => d.work(await requireActor(req), query.assignee ?? 'me'));
   route(app, 'GET', '/api/inbox', {
     section: 'You',
     summary: 'your notifications, newest first',
-    query: z.object({ unread: z.enum(['1']).optional().describe('1: unread only') }),
+    query: z.object({ unread: z.enum(['1']).optional().describe('1: unread only'), limit: z.coerce.number().int().min(1).max(200).optional() }),
     agent: true,
-  }, async (req, { query }) => d.inbox(await requireActor(req), { unreadOnly: query.unread === '1' }));
+  }, async (req, { query }) => d.inbox(await requireActor(req), { unreadOnly: query.unread === '1', limit: query.limit }));
   route(app, 'POST', '/api/inbox/read', {
     section: 'You',
     summary: 'mark notifications as read',

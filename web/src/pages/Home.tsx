@@ -3,12 +3,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, itemPath } from '../api';
 import { useSession } from '../App';
 import { ErrorNote, TypeBadge, useFetch } from '../ui';
+import { AssigneePicker, useParamState, type Assignee, type Member } from '../filters';
 
 export default function Home() {
   const { me, refreshMe } = useSession();
   const [params] = useSearchParams();
   const q = params.get('q');
-  const work = useFetch<any[]>('/api/me/work');
+  const [assignee, setAssignee] = useParamState<Assignee>('assignee', 'home:assignee', 'me');
+  const work = useFetch<{ items: any[]; members: Member[] }>(`/api/work?assignee=${encodeURIComponent(assignee)}`);
   const results = useFetch<any[]>(q ? `/api/search?q=${encodeURIComponent(q)}` : null);
   const navigate = useNavigate();
   const [name, setName] = useState('');
@@ -75,15 +77,18 @@ export default function Home() {
       </section>
 
       <section>
-        <h2>Assigned to you</h2>
-        {work.data?.length === 0 && <p className="muted">Nothing open is assigned to you.</p>}
-        <ItemList items={work.data ?? []} />
+        <div className="section-head">
+          <h2>{assignee === 'me' ? 'Assigned to you' : 'Open work'}</h2>
+          <AssigneePicker value={assignee} onChange={setAssignee} members={work.data?.members ?? []} label="Assigned to" />
+        </div>
+        {work.data?.items.length === 0 && <p className="muted">Nothing open matches.</p>}
+        <ItemList items={work.data?.items ?? []} showAssignee={assignee !== 'me'} />
       </section>
     </div>
   );
 }
 
-export function ItemList({ items }: { items: any[] }) {
+export function ItemList({ items, showAssignee }: { items: any[]; showAssignee?: boolean }) {
   return (
     <ul className="item-list">
       {items.map((i) => (
@@ -93,6 +98,8 @@ export function ItemList({ items }: { items: any[] }) {
             {i.ref}
           </Link>
           <span className="title">{i.title}</span>
+          {i.working && <span className="working">working</span>}
+          {showAssignee && <span className="muted small">{i.assigneeName ?? 'unassigned'}</span>}
           <span className="status">{i.status}</span>
         </li>
       ))}

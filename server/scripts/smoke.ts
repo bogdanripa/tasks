@@ -848,6 +848,13 @@ const looseNow = await api('GET', `/api/items/${loose.ref}`);
 assert.equal(looseNow.item.assigneeKind, 'human');
 assert.ok(looseNow.history.some((e: any) => e.data?.byReply));
 console.log('✓ replying on an unassigned item assigns it to the person');
+const workMe = await api('GET', '/api/work?assignee=me');
+assert.ok(workMe.items.some((i: any) => i.ref === loose.ref), 'my open work, across projects');
+const workHouse = await api('GET', `/api/work?assignee=${house.agent.id}`);
+assert.ok(workHouse.items.length > 0 && workHouse.items.every((i: any) => i.assigneeName === house.agent.name));
+assert.ok((await api('GET', '/api/work?assignee=agents')).items.every((i: any) => i.assigneeKind === 'agent'));
+assert.ok(workMe.members.some((m: any) => m.id === house.agent.id), 'with the members to pick from');
+console.log('✓ open work by assignee across projects: me, one agent, all agents');
 
 // ---- Alerts: a person's Telegram gets what needs them ----
 const telegramMessages: { token: string; chat: string; text: string }[] = [];

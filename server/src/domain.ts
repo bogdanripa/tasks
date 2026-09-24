@@ -764,6 +764,35 @@ export async function assignedTo(actor: Actor, accountId: string, includeDone = 
     order by v.updated_at desc limit 200`;
 }
 
+/**
+ * Open work across every project you can see, by assignee: me, agents, humans, unassigned, or one member's id.
+ * Also returns the members you could pick (people and agents of your orgs).
+ */
+export async function work(actor: Actor, assignee: string) {
+  const who =
+    assignee === 'me' ? sql`v.assignee_id = ${actor.id}`
+    : assignee === 'agents' ? sql`v.assignee_kind = 'agent'`
+    : assignee === 'humans' ? sql`v.assignee_kind = 'human'`
+    : assignee === 'unassigned' ? sql`v.assignee_id is null`
+    : assignee === 'all' ? sql`true`
+    : sql`v.assignee_id = ${assignee}`;
+  const [items, members] = await Promise.all([
+    sql`
+      select v.ref, v.type, v.title, v.status, v.done, v.updated_at, v.assignee_name, v.assignee_kind, par.ref as parent_ref,
+             ${workingSql(sql`v.id`)} as working
+      from item_view v
+      join memberships m on m.org_id = v.org_id and m.account_id = ${actor.id}
+      left join item_view par on par.id = v.parent_id
+      where v.closed_at is null and ${who}
+      order by v.updated_at desc limit 200`,
+    sql`
+      select distinct a.id, a.name, a.kind from memberships mine
+      join memberships m on m.org_id = mine.org_id join accounts a on a.id = m.account_id
+      where mine.account_id = ${actor.id} and a.deactivated_at is null order by a.name`,
+  ]);
+  return { items, members };
+}
+
 export type CreateItemInput = {
   type: ItemType;
   title: string;
@@ -1098,7 +1127,7 @@ export async function search(actor: Actor, q: string, limit = 30) {
 export async function inbox(actor: Actor, opts: { unreadOnly?: boolean; afterId?: number; limit?: number } = {}) {
   return sql`
     select n.id, n.reason, n.created_at, n.read_at, e.type as event_type, e.data as event_data,
-           a.name as actor_name, a.kind as actor_kind, v.ref as item_ref, v.title as item_title, v.type as item_type, v.status as item_status
+           a.id as actor_id, a.name as actor_name, a.kind as actor_kind, v.ref as item_ref, v.title as item_title, v.type as item_type, v.status as item_status
     from notifications n
     join events e on e.id = n.event_id
     join accounts a on a.id = e.actor_id

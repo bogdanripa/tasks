@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Item } from '../api';
 import { useSession } from '../App';
 import { Avatar, ErrorNote, SkillChip, useFetch } from '../ui';
+import { AssigneePicker, matchAssignee, useParamState, type Assignee, type Member } from '../filters';
+import { ItemTable } from './ItemTable';
 
 type Filter = 'all' | 'issue' | 'task';
 
@@ -13,7 +15,13 @@ export default function Board() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<{ status: string; index: number } | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
-  const admin = useSession().me.orgs.find((o) => o.slug === org)?.role !== 'member';
+  const { me } = useSession();
+  const admin = me.orgs.find((o) => o.slug === org)?.role !== 'member';
+  const [view, setView] = useParamState<'board' | 'list'>('view', `view:${org}/${key}`, 'board');
+  const [assignee, setAssignee] = useParamState<Assignee>('assignee', `assignee:${org}/${key}`, 'all');
+  const [showDone, setShowDone] = useParamState<'yes' | 'no'>('done', `done:${org}/${key}`, 'no');
+  const members: Member[] = useFetch<any>(`/api/orgs/${org}`).data?.members ?? [];
+  const shown = (i: Item) => (filter === 'all' || i.type === filter) && matchAssignee(i, assignee, me.id);
 
   useEffect(() => {
     try {
@@ -30,9 +38,10 @@ export default function Board() {
   const columns = useMemo(() => {
     const by: Record<string, Item[]> = {};
     for (const c of data?.project.columns ?? []) by[c] = [];
-    for (const i of data?.items ?? []) if (filter === 'all' || i.type === filter) (by[i.status] ??= []).push(i);
+    for (const i of data?.items ?? []) if (shown(i)) (by[i.status] ??= []).push(i);
     return by;
-  }, [data, filter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, filter, assignee, me.id]);
 
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
@@ -66,18 +75,39 @@ export default function Board() {
         <div>
           <h1>{project.name}</h1>
         </div>
-        <div className="segmented" role="tablist">
+        <div className="segmented" role="tablist" aria-label="View">
+          {(['board', 'list'] as const).map((v) => (
+            <button key={v} role="tab" aria-selected={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>
+              {v === 'board' ? 'Board' : 'List'}
+            </button>
+          ))}
+        </div>
+        <div className="segmented" role="tablist" aria-label="Type">
           {(['all', 'issue', 'task'] as Filter[]).map((f) => (
             <button key={f} role="tab" aria-selected={filter === f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>
               {f === 'all' ? 'All' : f === 'issue' ? 'Issues' : 'Tasks'}
             </button>
           ))}
         </div>
+        <AssigneePicker value={assignee} onChange={setAssignee} members={members} />
+        {view === 'list' && (
+          <label className="picker">
+            <input type="checkbox" checked={showDone === 'yes'} onChange={(e) => setShowDone(e.target.checked ? 'yes' : 'no')} />
+            <span className="small">Show done</span>
+          </label>
+        )}
         <Link to={`/${org}/${key}/timeline`} className="button">Timeline</Link>
         <Link to={`/${org}/${key}/values`} className="button">Values</Link>
         {admin && <Link to={`/${org}/${key}/settings`} className="button">Settings</Link>}
       </div>
       <ErrorNote error={opError} />
+      {view === 'list' ? (
+        <ItemTable
+          items={data.items.filter((i) => shown(i) && (showDone === 'yes' || !i.done)) as any}
+          columns={project.columns}
+          flat={filter === 'task'}
+        />
+      ) : (
       <div className="board">
         {project.columns.map((status: string, ci: number) => {
           const cards = columns[status] ?? [];
@@ -136,6 +166,7 @@ export default function Board() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }
