@@ -199,3 +199,57 @@ export function Markdown({ children }: { children: string }) {
     </div>
   );
 }
+
+/**
+ * Markdown that turns into an editor when clicked (or its placeholder is clicked). Links and text
+ * selection don't trigger editing. Cmd/Ctrl+Enter saves, Esc cancels.
+ */
+export function EditableMarkdown(props: { value: string; onSave: (value: string) => Promise<unknown>; placeholder: string; editPlaceholder?: string; readOnly?: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    try {
+      await props.onSave(draft ?? '');
+      setDraft(null);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  if (draft !== null) {
+    return (
+      <div className="stack">
+        <textarea
+          autoFocus
+          rows={Math.min(Math.max(draft.split('\n').length + 2, 8), 30)}
+          value={draft}
+          placeholder={props.editPlaceholder ?? 'Markdown is supported.'}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setDraft(null);
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+          }}
+        />
+        <ErrorNote error={error} />
+        <div className="actions">
+          <span className="muted small grow">Markdown supported · ⌘/Ctrl+Enter to save · Esc to cancel</span>
+          <button className="ghost small" onClick={() => setDraft(null)}>Cancel</button>
+          <button className="primary small" onClick={save}>Save</button>
+        </div>
+      </div>
+    );
+  }
+  if (props.readOnly) return props.value ? <div className="body"><Markdown>{props.value}</Markdown></div> : <p className="muted">{props.placeholder}</p>;
+  return (
+    <div
+      className={`body editable ${props.value ? '' : 'empty'}`}
+      title="Click to edit"
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('a') || window.getSelection()?.toString()) return;
+        setDraft(props.value);
+      }}
+    >
+      {props.value ? <Markdown>{props.value}</Markdown> : <span className="muted">{props.placeholder}</span>}
+    </div>
+  );
+}

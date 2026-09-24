@@ -3,31 +3,25 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
 import { Avatar, ErrorNote, KindBadge, Modal, useFetch } from '../ui';
-import { AgentKeyReveal } from './Agent';
 
 export default function OrgPage() {
   const { org } = useParams();
   const { me, refreshMe } = useSession();
   const { data, error, reload } = useFetch<any>(`/api/orgs/${org}`);
   const navigate = useNavigate();
-  const [modal, setModal] = useState<'project' | 'invite' | 'agent' | 'delete' | null>(null);
-  const [newAgent, setNewAgent] = useState<any>(null);
+  const [newProject, setNewProject] = useState(false);
 
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
   const admin = data.org.role !== 'member';
   const humans = data.members.filter((m: any) => m.kind === 'human');
   const agents = data.members.filter((m: any) => m.kind === 'agent');
-  const canRemove = (m: any) => m.id !== me.id && (m.role === 'member' ? admin : data.org.role === 'owner');
-  const remove = async (m: any, self = false) => {
-    const what = self ? `Leave ${data.org.name}?` : `Remove ${m.name} from ${data.org.name}?`;
-    if (!confirm(`${what} Their open items here will be unassigned.`)) return;
+  const leave = async () => {
+    if (!confirm(`Leave ${data.org.name}? Your open items here will be unassigned.`)) return;
     try {
-      await api('DELETE', `/api/orgs/${org}/members/${m.id}`);
-      if (self) {
-        await refreshMe();
-        navigate('/');
-      } else reload();
+      await api('DELETE', `/api/orgs/${org}/members/${me.id}`);
+      await refreshMe();
+      navigate('/');
     } catch (e) {
       alert((e as Error).message);
     }
@@ -37,7 +31,10 @@ export default function OrgPage() {
     <div className="page">
       <div className="page-head">
         <h1>{data.org.name}</h1>
-        {admin && <button className="primary" onClick={() => setModal('project')}>New project</button>}
+        <div className="row-gap">
+          {admin && <Link to={`/${org}/settings`} className="button">Settings</Link>}
+          {admin && <button className="primary" onClick={() => setNewProject(true)}>New project</button>}
+        </div>
       </div>
 
       <section>
@@ -56,53 +53,26 @@ export default function OrgPage() {
 
       <div className="two-col">
         <section>
-          <div className="section-head">
-            <h2>People</h2>
-            {admin && <button className="small" onClick={() => setModal('invite')}>Invite</button>}
-          </div>
+          <h2>People</h2>
           <ul className="people">
             {humans.map((m: any) => (
               <li key={m.id}>
                 <Avatar name={m.name} url={m.avatarUrl} />
                 <span>{m.name}</span>
-                <span className="muted small">{m.email}</span>
                 <span className="role">{m.role}</span>
-                {canRemove(m) && <button className="ghost small danger" onClick={() => remove(m)}>Remove</button>}
-                {m.id === me.id && <button className="ghost small" onClick={() => remove(m, true)}>Leave</button>}
-              </li>
-            ))}
-            {data.invites.map((i: any) => (
-              <li key={i.email} className="pending">
-                <Avatar />
-                <span>{i.email}</span>
-                <span className="muted small">invited</span>
-                <span className="role">{i.role}</span>
-                <button
-                  className="ghost small danger"
-                  onClick={async () => {
-                    await api('DELETE', `/api/orgs/${org}/invites/${encodeURIComponent(i.email)}`);
-                    reload();
-                  }}
-                >
-                  Cancel
-                </button>
+                {m.id === me.id && <button className="ghost small" onClick={leave}>Leave</button>}
               </li>
             ))}
           </ul>
         </section>
-
         <section>
-          <div className="section-head">
-            <h2>Agents</h2>
-            {admin && <button className="small" onClick={() => setModal('agent')}>New agent</button>}
-          </div>
-          {agents.length === 0 && <p className="muted">No agents yet. Agents sign in with an API key and work through MCP.</p>}
+          <h2>Agents</h2>
+          {agents.length === 0 && <p className="muted">No agents yet.{admin && <> Add one in <Link to={`/${org}/settings`}>settings</Link>.</>}</p>}
           <ul className="people">
             {agents.map((m: any) => (
               <li key={m.id}>
                 <Avatar name={m.name} kind="agent" />
                 {admin ? <Link to={`/agents/${m.id}`}>{m.name}</Link> : <span>{m.name}</span>}
-                <span className="muted small">{m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'polls via MCP'}</span>
                 <KindBadge kind="agent" />
               </li>
             ))}
@@ -110,85 +80,26 @@ export default function OrgPage() {
         </section>
       </div>
 
-      {data.org.role === 'owner' && (
-        <section className="danger-zone">
-          <div>
-            <h2>Delete organization</h2>
-            <p className="muted small">Permanently removes every project, item, comment, history entry and agent in {data.org.name}. Links from other organizations’ items to these items are removed too.</p>
-          </div>
-          <button className="danger" onClick={() => setModal('delete')}>Delete…</button>
-        </section>
-      )}
-
-      {modal === 'delete' && (
-        <FormModal
-          title={`Delete ${data.org.name}?`}
-          fields={[{ name: 'confirm', label: `Type "${data.org.slug}" to confirm`, placeholder: data.org.slug }]}
-          submitLabel="Delete permanently"
-          danger
-          note="This cannot be undone. The organization's agents stop working immediately."
-          onClose={() => setModal(null)}
-          onSubmit={async (v) => {
-            await api('DELETE', `/api/orgs/${org}`, { confirm: v.confirm });
-            await refreshMe();
-            navigate('/');
-          }}
-        />
-      )}
-      {modal === 'project' && (
+      {newProject && (
         <FormModal
           title="New project"
           fields={[
             { name: 'name', label: 'Name', placeholder: 'Website' },
             { name: 'key', label: 'Key', placeholder: 'WEB', hint: 'Prefix for item refs, e.g. WEB-12', optional: true, derive: { from: 'name', fn: defaultProjectKey } },
             { name: 'description', label: 'Description', optional: true },
-            { name: 'columns', label: 'Columns', optional: true, placeholder: 'Backlog, Todo, In progress, Review, Done', hint: 'Comma-separated. The last column means done.' },
           ]}
-          onClose={() => setModal(null)}
+          note="You can set its board columns and agent guidelines in the project’s settings."
+          onClose={() => setNewProject(false)}
           onSubmit={async (v) => {
             await api('POST', `/api/orgs/${org}/projects`, {
               name: v.name,
               // Only send a key the user typed; otherwise the server derives it and avoids collisions.
               key: v.key && v.key.toUpperCase() !== defaultProjectKey(v.name) ? v.key.toUpperCase() : undefined,
               description: v.description || undefined,
-              columns: v.columns ? v.columns.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
             });
             reload();
           }}
         />
-      )}
-      {modal === 'invite' && (
-        <FormModal
-          title="Invite someone"
-          fields={[{ name: 'email', label: 'Google account email', type: 'email' }]}
-          submitLabel="Invite"
-          note="They join this organization the next time they sign in with Google."
-          onClose={() => setModal(null)}
-          onSubmit={async (v) => {
-            await api('POST', `/api/orgs/${org}/invites`, { email: v.email });
-            reload();
-          }}
-        />
-      )}
-      {modal === 'agent' && (
-        <FormModal
-          title="New agent"
-          fields={[
-            { name: 'name', label: 'Name', placeholder: 'backend-builder' },
-            { name: 'webhookUrl', label: 'Webhook URL', optional: true, placeholder: 'https://…', hint: 'Called when the agent is assigned work. Leave empty if it polls via MCP.' },
-          ]}
-          onClose={() => setModal(null)}
-          onSubmit={async (v) => {
-            setNewAgent(await api('POST', `/api/orgs/${org}/agents`, { name: v.name, webhookUrl: v.webhookUrl || null }));
-            reload();
-            refreshMe();
-          }}
-        />
-      )}
-      {newAgent && (
-        <Modal title={`${newAgent.agent.name} is ready`} onClose={() => setNewAgent(null)}>
-          <AgentKeyReveal apiKey={newAgent.key.key} webhookSecret={newAgent.agent.webhookUrl ? newAgent.agent.webhookSecret : null} />
-        </Modal>
       )}
     </div>
   );

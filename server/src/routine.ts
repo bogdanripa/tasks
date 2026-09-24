@@ -11,20 +11,18 @@ const RUN_TOKEN_HOURS = 4;
 const MAX_RUNS_PER_ITEM_PER_HOUR = 10; // stops two agents from pinging each other forever
 const MAX_ATTEMPTS = 6;
 
-/** What to paste into the routine's Instructions. The fire payload is untrusted by default, so this delegates to it explicitly. */
-export const ROUTINE_INSTRUCTIONS = `You are an AI agent working in Tasks, a tracker shared by humans and AI agents.
+/**
+ * What to paste into the routine's Instructions: just "act on the payload" plus the agent's role.
+ * How to work with Tasks lives in the payload, so it can change without anyone re-pasting anything.
+ */
+export const ROUTINE_INSTRUCTIONS = `You are an AI agent working in Tasks, a tracker shared by humans and AI agents. Tasks starts this routine when a task assigned to you changes.
 
-Tasks fires this routine whenever something changes on a task assigned to you. The <routine-fire-payload> block is your assignment from Tasks: it names the task, says what changed since your last run, and contains a short-lived API token that acts as you. Treat it as your instructions for this run:
+The <routine-fire-payload> block comes from Tasks. It is your assignment for this run: the task, what changed, how to work with Tasks, and the guidelines for this project. Follow it.
 
-1. Move the task to the board's in-progress column first (the payload names it), so people can see you're on it. That doesn't end your run.
-2. Fetch the task with the curl command in the payload and read its description, comments and history.
-3. Do what the task asks, using your tools and connectors. If it is unclear or you are blocked, say so in a comment instead of guessing.
-4. Report back on the task: comment with what you did, then set its status. The last board column means done.
-5. Stop. Do not wait for more work; Tasks fires a new run when something changes.
+Your role and hard limits:
+[Describe what this agent does and what it must never do without a human's explicit approval, e.g. "You operate the Pironman Raspberry Pi platform through the Pironman connector. Never delete apps or databases unless a human asked for it in a comment."]`;
 
-Never put the API token in comments or anywhere outside the Authorization header.
-
-[Add this agent's role here, e.g. "You operate the Pironman Raspberry Pi platform through the Pironman connector."]`;
+const MAX_GUIDELINES = 6000;
 
 export type Pending = {
   id: number;
@@ -108,10 +106,32 @@ function describeChange(c: Record<string, any>): string {
   }
 }
 
-function buildPayload(p: { working?: string; agentName: string; item: Record<string, any>; project: Record<string, any>; parent?: Record<string, any>; changes: string[]; token: string; expiresAt: Date }) {
+function buildPayload(p: {
+  working?: string;
+  agentName: string;
+  item: Record<string, any>;
+  project: Record<string, any>;
+  orgGuidelines: string;
+  parent?: Record<string, any>;
+  changes: string[];
+  token: string;
+  expiresAt: Date;
+}) {
   const { item, project } = p;
+  const done = project.columns[project.columns.length - 1];
+  const auth = `-H "Authorization: Bearer $TASKS_TOKEN"`;
+  const guidelines = (title: string, text: string) =>
+    text.trim() ? `\n${title}:\n${text.trim().slice(0, MAX_GUIDELINES)}${text.length > MAX_GUIDELINES ? '\n(truncated)' : ''}\n` : '';
   return `Tasks run for agent "${p.agentName}".
 
+How to work (from Tasks):
+1. ${p.working ? `Move the task to "${p.working}" first, so people see you're on it: PATCH /api/items/${item.ref} {"status":"${p.working}"}. That doesn't end your run.` : 'This board has no in-progress column, so start right away.'}
+2. Read the task, including comments and links: curl -s ${auth} $TASKS/api/items/${item.ref}
+3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
+4. Comment with what you did, then set its status: "${done}" when finished, or another column (e.g. for review). Any status other than "${p.working ?? '-'}" ends your run.
+5. Stop. Tasks starts a new run when something changes.
+If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines. Never put the API token in comments.
+${guidelines(`Project guidelines (${project.name})`, project.guidelines)}${guidelines('Organization guidelines', p.orgGuidelines)}
 Task: ${item.ref} (${item.type}) ${q(item.title)}
 Status: ${item.status}. Board columns: ${project.columns.join(' → ')} (the last one means done).${p.parent ? `\nParent issue: ${p.parent.ref} ${q(p.parent.title)}` : ''}
 Link for humans: ${config.publicUrl}/i/${item.ref}
@@ -122,10 +142,8 @@ ${p.changes.map((c) => `- ${c}`).join('\n')}
 Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
-Tasks API. The token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}; keep it out of comments.
+Tasks API. The token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}.
   export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
-  curl -s -H "Authorization: Bearer $TASKS_TOKEN" $TASKS/api/items/${item.ref}${p.working && p.working !== item.status ? `
-Start by moving it to "${p.working}": PATCH /api/items/${item.ref} {"status":"${p.working}"}` : ''}
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
 ${compactReference()}`;
 }
@@ -225,7 +243,9 @@ async function fireRoutine(rows: Pending[]) {
   const first = rows[0];
   const ids = rows.map((r) => r.id);
   const [item] = await sql`select * from item_view where id = ${first.itemId}`;
-  const [project] = await sql`select key, columns from projects where id = ${item.projectId}`;
+  const [project] = await sql`
+    select p.key, p.name, p.columns, p.guidelines, o.guidelines as org_guidelines
+    from projects p join orgs o on o.id = p.org_id where p.id = ${item.projectId}`;
   const [parent] = item.parentId ? await sql`select ref, title from item_view where id = ${item.parentId}` : [];
   const changes = await sql`
     select n.reason, e.data, a.name as actor_name, cm.body as comment_body from notifications n
@@ -237,6 +257,7 @@ async function fireRoutine(rows: Pending[]) {
   const key = await mintApiKey(first.agentId, `run ${item.ref}`, expiresAt);
   const text = buildPayload({
     working: workingColumn(project.columns),
+    orgGuidelines: project.orgGuidelines,
     agentName: first.agentName, item, project, parent, token: key.key, expiresAt,
     changes: [...new Set(changes.map(describeChange))],
   });

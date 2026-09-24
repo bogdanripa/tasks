@@ -59,6 +59,7 @@ const waitFor = async (pred: () => boolean, what: string) => {
 
 // Human signs in, creates an org and two projects.
 await api('POST', '/auth/dev', { email: `alice-${run}@example.com`, name: 'Alice' });
+const aliceCookieForSettings = cookie;
 const org = `acme-${run}`;
 await api('POST', '/api/orgs', { slug: org, name: 'Acme' });
 await api('POST', `/api/orgs/${org}/projects`, { key: 'WEB', name: 'Website' });
@@ -165,6 +166,11 @@ await api('PATCH', `/api/agents/${rAgent.agent.id}`, { routineUrl: `http://local
 await assert.rejects(api('PATCH', `/api/agents/${rAgent.agent.id}`, { routineUrl: 'https://evil.example.com/fire' }), /must look like/);
 
 const opsRoot = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Pi housekeeping' });
+// Guidelines (project and org) travel with every run.
+await api('PATCH', `/api/projects/${org}/WEB`, { guidelines: 'Run the smoke test before Done.' });
+await api('PATCH', `/api/orgs/${org}`, { guidelines: 'Be kind to the Pi.' });
+assert.equal((await api('GET', `/api/items/${opsRoot.ref}`)).project.guidelines, 'Run the smoke test before Done.');
+
 // Backlog is parked: assigning there doesn't start a run; moving it out does.
 const parkedTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: opsRoot.ref, title: 'Someday: tidy crontab', assignee: rAgent.agent.id });
 await api('POST', `/api/comments/${parkedTask.ref}`, { body: 'no rush' });
@@ -176,7 +182,10 @@ await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'Todo' });
 await waitFor(() => fires.length === 1, 'run once the item leaves Backlog');
 assert.match(fires[0].text, /moved it from Backlog to Todo/);
 // The payload tells the agent to move it to the working column first; doing so doesn't end the run.
-assert.match(fires[0].text, /Start by moving it to "In progress": PATCH \/api\/items\/\S+ \{"status":"In progress"\}/);
+assert.match(fires[0].text, /Move the task to "In progress" first.*PATCH \/api\/items\/\S+ \{"status":"In progress"\}/);
+assert.match(fires[0].text, /Project guidelines \(Website\):\nRun the smoke test before Done\./);
+assert.match(fires[0].text, /Organization guidelines:\nBe kind to the Pi\./);
+assert.match(fires[0].text, /hard limits win, then the project guidelines, then the organization guidelines/);
 await api('PATCH', `/api/items/${parkedTask.ref}`, { status: 'In progress' }, tokenOf(fires[0].text));
 await api('POST', `/api/comments/${parkedTask.ref}`, { body: 'while you are at it: check cron.d too' });
 await new Promise((r) => setTimeout(r, 2000));
@@ -276,6 +285,40 @@ console.log('✓ a run takes all pending updates on its item');
 // Run tokens: expire shortly after the run ends, and never show up as the agent's keys.
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);
 fake.close();
+
+// ---- Project settings: columns (rename carries items, removal needs empty), delete ----
+await assert.rejects(api('POST', `/api/orgs/${org}/projects`, { name: 'x', key: 'SETTINGS' }), /reserved/);
+const ops = await api('POST', `/api/orgs/${org}/projects`, { name: 'Ops', key: 'OPS' });
+const inReview = await api('POST', `/api/projects/${org}/OPS/items`, { type: 'issue', title: 'Check backups', status: 'Review' });
+const doneItem = await api('POST', `/api/projects/${org}/OPS/items`, { type: 'issue', title: 'Old chore', status: 'Done' });
+assert.equal(ops.columns.join(','), 'Backlog,Todo,In progress,Review,Done');
+await assert.rejects(
+  api('PATCH', `/api/projects/${org}/OPS`, { columns: [{ name: 'Backlog', from: 'Backlog' }, { name: 'Done', from: 'Done' }] }),
+  /Move the items out first: Review has 1/,
+);
+// Rename Review→QA and In progress↔Todo swap, drop nothing, add Shipped as the new done column.
+await api('PATCH', `/api/projects/${org}/OPS`, {
+  columns: [
+    { name: 'Backlog', from: 'Backlog' }, { name: 'In progress', from: 'Todo' }, { name: 'Todo', from: 'In progress' },
+    { name: 'QA', from: 'Review' }, { name: 'Done', from: 'Done' }, { name: 'Shipped' },
+  ],
+});
+assert.equal((await api('GET', `/api/items/${inReview.ref}`)).item.status, 'QA');
+assert.equal((await api('GET', `/api/items/${doneItem.ref}`)).item.done, false, '"Done" is no longer the last column');
+cookie = '';
+await api('POST', '/auth/dev', { email: `dave-${run}@example.com` });
+const daveCookie = cookie;
+cookie = aliceCookieForSettings;
+await api('POST', `/api/orgs/${org}/invites`, { email: `dave-${run}@example.com` });
+cookie = daveCookie;
+await api('POST', '/auth/dev', { email: `dave-${run}@example.com` }); // accepts the invite as a member
+await assert.rejects(api('PATCH', `/api/projects/${org}/OPS`, { guidelines: 'nope' }), /Requires an org admin/);
+await assert.rejects(api('PATCH', `/api/orgs/${org}`, { name: 'nope' }), /Requires an org admin/);
+cookie = aliceCookieForSettings;
+await assert.rejects(api('DELETE', `/api/projects/${org}/OPS`, { confirm: 'WEB' }), /Type the project key/);
+await api('DELETE', `/api/projects/${org}/OPS`, { confirm: 'ops' });
+await assert.rejects(api('GET', `/api/items/${inReview.ref}`), /404/);
+console.log('✓ project settings: columns rename/swap/add, removal guarded, done recomputed, admin-only, delete');
 
 // ---- Members and agents: rename, delete (deactivate), remove people, cancel invites ----
 const aliceCookie = cookie;

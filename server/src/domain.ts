@@ -360,9 +360,95 @@ export function defaultProjectKey(name: string) {
   return clean.length >= 2 ? clean.slice(0, 3) : 'PRJ';
 }
 
+const RESERVED_KEYS = new Set(['SETTINGS', 'TIMELINE']); // would collide with app routes
+
+export async function updateOrg(actor: Actor, slug: string, patch: { name?: string; guidelines?: string }) {
+  const org = await resolveOrg(actor, slug, true);
+  return mutate(async (tx) => {
+    const [row] = await tx`
+      update orgs set name = coalesce(${patch.name?.trim() || null}, name), guidelines = coalesce(${patch.guidelines ?? null}, guidelines)
+      where id = ${org.id} returning *`;
+    const changed = [patch.name !== undefined && patch.name.trim() !== org.name && 'name', patch.guidelines !== undefined && patch.guidelines !== org.guidelines && 'guidelines'].filter(Boolean);
+    if (changed.length) await emit(tx, { orgId: org.id, actorId: actor.id, type: 'org.updated', data: { changed } });
+    return row;
+  });
+}
+
+type ColumnEdit = { name: string; from?: string | null };
+
+/**
+ * Admin edits to a project. Columns come as the full new list; `from` names the existing column a row
+ * was (renames carry their items along). A removed column must be empty. The last column means done,
+ * so items' closed state is recomputed when it changes.
+ */
+export async function updateProject(
+  actor: Actor,
+  ref: string,
+  patch: { name?: string; description?: string; guidelines?: string; columns?: ColumnEdit[] },
+) {
+  const project = await resolveProject(actor, ref);
+  if ((await orgRole(actor.id, project.orgId)) === 'member') throw forbidden('Requires an org admin');
+  const old: string[] = project.columns;
+  let columns: string[] | undefined;
+  const renames: [string, string][] = [];
+  if (patch.columns) {
+    columns = patch.columns.map((c) => c.name.trim());
+    if (columns.length < 2) throw badRequest('A project needs at least two columns');
+    if (columns.some((c) => !c)) throw badRequest('Column names can’t be empty');
+    if (new Set(columns.map((c) => c.toLowerCase())).size !== columns.length) throw badRequest('Column names must be unique');
+    const kept = new Set(patch.columns.map((c) => c.from).filter(Boolean) as string[]);
+    for (const c of patch.columns) {
+      if (c.from && !old.includes(c.from)) throw badRequest(`Unknown column "${c.from}"`);
+      if (c.from && c.from !== c.name.trim()) renames.push([c.from, c.name.trim()]);
+    }
+    const removed = old.filter((c) => !kept.has(c));
+    if (removed.length) {
+      const inUse = await sql`select status, count(*)::int as n from items where project_id = ${project.id} and status in ${sql(removed)} group by status`;
+      if (inUse.length) throw badRequest(`Move the items out first: ${inUse.map((r) => `${r.status} has ${r.n}`).join(', ')}`);
+    }
+  }
+  return mutate(async (tx) => {
+    if (columns) {
+      // Two-step rename so swapping names (A↔B) can't collide.
+      for (const [from] of renames) await tx`update items set status = ${'\u0001renaming:' + from} where project_id = ${project.id} and status = ${from}`;
+      for (const [from, to] of renames) await tx`update items set status = ${to} where project_id = ${project.id} and status = ${'\u0001renaming:' + from}`;
+      const done = columns[columns.length - 1];
+      await tx`update items set closed_at = coalesce(closed_at, now()) where project_id = ${project.id} and status = ${done}`;
+      await tx`update items set closed_at = null where project_id = ${project.id} and status <> ${done} and closed_at is not null`;
+    }
+    const [row] = await tx`
+      update projects set
+        name = coalesce(${patch.name?.trim() || null}, name),
+        description = coalesce(${patch.description ?? null}, description),
+        guidelines = coalesce(${patch.guidelines ?? null}, guidelines),
+        columns = ${columns ? tx`${columns}` : tx`columns`}
+      where id = ${project.id} returning *`;
+    const changes: Record<string, unknown> = {};
+    if (patch.name !== undefined && patch.name.trim() !== project.name) changes.name = [project.name, patch.name.trim()];
+    if (patch.description !== undefined && patch.description !== project.description) changes.description = true;
+    if (patch.guidelines !== undefined && patch.guidelines !== project.guidelines) changes.guidelines = true;
+    if (columns && columns.join('\n') !== old.join('\n')) changes.columns = [old, columns];
+    if (Object.keys(changes).length) {
+      await emit(tx, { orgId: project.orgId, projectId: project.id, actorId: actor.id, type: 'project.updated', data: { changes } });
+    }
+    return { ...row, orgSlug: project.orgSlug };
+  });
+}
+
+export async function deleteProject(actor: Actor, ref: string, confirm: string) {
+  const project = await resolveProject(actor, ref);
+  if ((await orgRole(actor.id, project.orgId)) === 'member') throw forbidden('Requires an org admin');
+  if (confirm.toUpperCase() !== project.key) throw badRequest(`Type the project key "${project.key}" to confirm`);
+  await mutate(async (tx) => {
+    await tx`delete from projects where id = ${project.id}`; // items, links, comments and its events cascade
+    await emit(tx, { orgId: project.orgId, actorId: actor.id, type: 'project.deleted', data: { key: project.key, name: project.name } });
+  });
+}
+
 export async function createProject(actor: Actor, slug: string, input: { key?: string; name: string; description?: string; columns?: string[] }) {
   const org = await resolveOrg(actor, slug, true);
   let key = input.key?.toUpperCase();
+  if (key && RESERVED_KEYS.has(key)) throw badRequest(`"${key}" is reserved; pick another key`);
   if (!key) {
     // No explicit key: derive one and take the first free variant (WEB, WEB2, WEB3, …).
     const base = defaultProjectKey(input.name);
@@ -619,7 +705,8 @@ const eventCols = sql`
 export async function itemDetail(actor: Actor, ref: string) {
   const item = await resolveItem(actor, ref);
   const [project, parent, tasks, links, comments, history] = await Promise.all([
-    sql`select id, key, name, columns from projects where id = ${item.projectId}`.then((r) => r[0]),
+    sql`select p.id, p.key, p.name, p.columns, p.guidelines, o.guidelines as org_guidelines
+        from projects p join orgs o on o.id = p.org_id where p.id = ${item.projectId}`.then((r) => r[0]),
     item.parentId ? sql`select ref, title, status, done from item_view where id = ${item.parentId}`.then((r) => r[0]) : null,
     sql`select ref, title, status, done, assignee_name, assignee_kind from item_view where parent_id = ${item.id} order by number`,
     // Links the actor can see; the other end may live in another project or org.

@@ -11,6 +11,8 @@ import Timeline from './pages/Timeline';
 import Inbox from './pages/Inbox';
 import Settings from './pages/Settings';
 import AgentPage from './pages/Agent';
+import OrgSettings from './pages/OrgSettings';
+import ProjectSettings from './pages/ProjectSettings';
 
 type Session = { me: Me; refreshMe: () => Promise<void> };
 const SessionContext = createContext<Session>(null!);
@@ -47,6 +49,8 @@ export default function App() {
           <Route path="/agents/:id" element={<AgentPage />} />
           <Route path="/i/:org/:ref" element={<ItemPage />} />
           <Route path="/:org" element={<OrgPage />} />
+          <Route path="/:org/settings" element={<OrgSettings />} />
+          <Route path="/:org/:key/settings" element={<ProjectSettings />} />
           <Route path="/:org/:key" element={<Board />} />
           <Route path="/:org/:key/timeline" element={<Timeline />} />
           <Route path="*" element={<div className="center muted">Not found</div>} />

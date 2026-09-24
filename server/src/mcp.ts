@@ -14,7 +14,8 @@ const INSTRUCTIONS = `Tasks: a tracker shared by humans and agents.
 - Start with get_inbox (or wait_for_work to block until something arrives), then get_item for context.
 - Move your work across the project's columns with update_item(status). The last column means done.
 - When your work reveals a need elsewhere (any project, even another org you belong to), create_issue with triggered_by set to the item you are working on, so the chain stays traceable.
-- Leave a comment summarizing what you did before marking an item done.`;
+- get_item returns the project's and organization's guidelines (project.guidelines, project.orgGuidelines): follow them. Your own hard limits win over project guidelines, which win over organization guidelines.
+- Move an item to the in-progress column when you start on it. Leave a comment summarizing what you did before marking it done.`;
 
 const text = (value: unknown) => ({
   content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],

@@ -61,6 +61,14 @@ export function apiRoutes(app: FastifyInstance) {
     summary: 'an organization: projects, members (humans and agents), pending invites',
     agent: true,
   }, async (req) => d.orgDetail(await requireActor(req), req.params.org));
+  route(app, 'PATCH', '/api/orgs/:org', {
+    section: 'Organizations',
+    summary: 'rename an organization or edit its guidelines (admins)',
+    body: z.object({
+      name: z.string().min(1).max(80).optional(),
+      guidelines: z.string().max(20_000).optional().describe('Markdown; sent to agents with every run in this organization'),
+    }),
+  }, async (req, { body }) => d.updateOrg(await requireActor(req), req.params.org, body));
   route(app, 'DELETE', '/api/orgs/:org', {
     section: 'Organizations',
     summary: 'delete an organization and everything in it (owners only)',
@@ -170,6 +178,28 @@ export function apiRoutes(app: FastifyInstance) {
   route(app, 'GET', '/api/projects/:org/:key', { section: 'Projects', summary: 'a board: the project and its items', agent: true }, async (req) => {
     const project = await d.resolveProject(await requireActor(req), `${req.params.org}/${req.params.key}`);
     return { project, items: await d.listItems(project) };
+  });
+  route(app, 'PATCH', '/api/projects/:org/:key', {
+    section: 'Projects',
+    summary: 'edit a project: name, description, guidelines, board columns (admins)',
+    body: z.object({
+      name: z.string().min(1).max(80).optional(),
+      description: z.string().max(2000).optional(),
+      guidelines: z.string().max(20_000).optional().describe('Markdown; sent to agents with every run on this project'),
+      columns: z
+        .array(z.object({ name: z.string().max(40), from: z.string().nullable().optional().describe('existing column this one was; omit for a new column') }))
+        .max(12)
+        .optional()
+        .describe('the full new list in order; the last means done; removed columns must be empty'),
+    }),
+  }, async (req, { body }) => d.updateProject(await requireActor(req), `${req.params.org}/${req.params.key}`, body));
+  route(app, 'DELETE', '/api/projects/:org/:key', {
+    section: 'Projects',
+    summary: 'delete a project and everything in it (admins)',
+    body: z.object({ confirm: z.string().describe('the project key, repeated') }),
+  }, async (req, { body }) => {
+    await d.deleteProject(await requireActor(req), `${req.params.org}/${req.params.key}`, body.confirm);
+    return { ok: true };
   });
   route(app, 'GET', '/api/projects/:org/:key/timeline', {
     section: 'Projects',
