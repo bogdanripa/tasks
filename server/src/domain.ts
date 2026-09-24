@@ -412,6 +412,10 @@ export async function updateProject(
       // Two-step rename so swapping names (A↔B) can't collide.
       for (const [from] of renames) await tx`update items set status = ${'\u0001renaming:' + from} where project_id = ${project.id} and status = ${from}`;
       for (const [from, to] of renames) await tx`update items set status = ${to} where project_id = ${project.id} and status = ${'\u0001renaming:' + from}`;
+      // Recurring schedules follow renames; ones targeting a removed column fall back to the first column.
+      for (const [from] of renames) await tx`update schedules set status = ${'\u0001renaming:' + from} where project_id = ${project.id} and status = ${from}`;
+      for (const [from, to] of renames) await tx`update schedules set status = ${to} where project_id = ${project.id} and status = ${'\u0001renaming:' + from}`;
+      await tx`update schedules set status = null where project_id = ${project.id} and status is not null and status <> all(${columns})`;
       const done = columns[columns.length - 1];
       await tx`update items set closed_at = coalesce(closed_at, now()) where project_id = ${project.id} and status = ${done}`;
       await tx`update items set closed_at = null where project_id = ${project.id} and status <> ${done} and closed_at is not null`;
@@ -520,6 +524,8 @@ export type CreateItemInput = {
   assignee?: string | null;
   status?: string;
   triggeredBy?: string;
+  /** Set when a recurring schedule created the item; shown in its history. */
+  schedule?: string;
 };
 
 export async function createItem(actor: Actor, project: Row, input: CreateItemInput) {
@@ -549,7 +555,7 @@ export async function createItem(actor: Actor, project: Row, input: CreateItemIn
     const ref = `${project.orgSlug}/${project.key}-${n}`;
     const ev = await emit(tx, {
       orgId: project.orgId, projectId: project.id, itemId: item.id, actorId: actor.id, type: 'item.created',
-      data: { ref, type: input.type, title, status, parentRef: parent?.ref, assignee: assignee?.name, triggeredBy: trigger?.ref },
+      data: { ref, type: input.type, title, status, parentRef: parent?.ref, assignee: assignee?.name, triggeredBy: trigger?.ref, schedule: input.schedule },
     });
     if (assignee) await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
     if (parent) {

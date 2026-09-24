@@ -12,6 +12,7 @@ import { apiRoutes } from './routes.js';
 import { mcpRoutes } from './mcp.js';
 import { startDeliveryWorker } from './delivery.js';
 import { collectRoutes } from './apidoc.js';
+import { startScheduler } from './schedules.js';
 
 const app = Fastify({ logger: { level: config.production ? 'info' : 'warn' }, trustProxy: true });
 await app.register(cookie);
@@ -47,6 +48,7 @@ if (existsSync(webDist)) {
 
 await migrate();
 startDeliveryWorker();
+startScheduler();
 // '::' is dual-stack in Node: pironman's healthcheck uses ::1, its proxy uses IPv4.
 await app.listen({ port: config.port, host: process.env.HOST || '::' });
 console.log(`tasks listening on :${config.port}`);

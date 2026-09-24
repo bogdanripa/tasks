@@ -3,6 +3,10 @@
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import postgres from 'postgres';
+
+// Direct DB access, only to simulate time passing for the scheduler.
+const db = postgres(process.env.DATABASE_URL ?? 'postgres://tasks:tasks@localhost:5434/tasks', { onnotice: () => {} });
 
 const BASE = process.argv[2] ?? 'http://localhost:3000';
 const run = Date.now().toString(36);
@@ -286,10 +290,44 @@ console.log('✓ a run takes all pending updates on its item');
 assert.equal((await api('GET', `/api/agents/${rAgent.agent.id}`)).keys.length, 1);
 fake.close();
 
+// ---- Recurring items ----
+const aliceEmail = `alice-${run}@example.com`;
+const scheduleIn = { name: 'Daily Pi check', cron: '0 9 * * *', timezone: 'Europe/Bucharest', title: 'Pi check {date}', body: 'Run on {weekday}.', status: 'Todo', assignee: aliceEmail };
+await assert.rejects(api('POST', `/api/projects/${org}/WEB/schedules`, { ...scheduleIn, cron: '0 25 * * *' }), /Invalid schedule/);
+await assert.rejects(api('POST', `/api/projects/${org}/WEB/schedules`, { ...scheduleIn, timezone: 'Mars/Base' }), /Unknown timezone/);
+await assert.rejects(api('POST', `/api/projects/${org}/WEB/schedules`, { ...scheduleIn, status: 'Nope' }), /Unknown column/);
+const daily = await api('POST', `/api/projects/${org}/WEB/schedules`, scheduleIn);
+const next = new Date(daily.nextRunAt);
+assert.equal(new Intl.DateTimeFormat('en', { timeZone: 'Europe/Bucharest', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }).format(next), '09:00');
+assert.ok(next.getTime() > Date.now() && next.getTime() - Date.now() <= 86_400_000);
+const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bucharest' }).format(new Date());
+const ran = await api('POST', `/api/schedules/${daily.id}/run`);
+const made = await api('GET', `/api/items/${ran.ref}`);
+assert.equal(made.item.title, `Pi check ${today}`);
+assert.match(made.item.body, /^Run on \w+day\.$/);
+assert.equal(made.item.status, 'Todo');
+assert.equal(made.item.assigneeName, 'Alice');
+assert.equal(made.history.find((e: any) => e.type === 'item.created').data.schedule, 'Daily Pi check');
+await api('PATCH', `/api/schedules/${daily.id}`, { ...scheduleIn, skipIfOpen: true });
+assert.equal((await api('POST', `/api/schedules/${daily.id}/run`)).skipped, true, 'previous one still open');
+// Downtime: the 9:00 run was missed hours ago. It runs once to catch up, then waits for the next 9:00.
+await api('PATCH', `/api/schedules/${daily.id}`, { ...scheduleIn, skipIfOpen: false });
+await db`update schedules set next_run_at = now() - interval '5 hours' where id = ${daily.id}`;
+const nudge = await api('POST', `/api/projects/${org}/WEB/schedules`, { ...scheduleIn, name: 'nudge', enabled: false }); // saving wakes the scheduler
+const countChecks = async () => (await api('GET', `/api/projects/${org}/WEB`)).items.filter((i: any) => i.title === `Pi check ${today}`).length;
+for (let i = 0; i < 30 && (await countChecks()) < 2; i++) await new Promise((r) => setTimeout(r, 100));
+await new Promise((r) => setTimeout(r, 500));
+assert.equal(await countChecks(), 2, 'caught up exactly once');
+const after = (await api('GET', `/api/projects/${org}/WEB/schedules`)).find((x: any) => x.id === daily.id);
+assert.ok(new Date(after.nextRunAt).getTime() > Date.now(), 'next run is in the future again');
+await api('DELETE', `/api/schedules/${nudge.id}`);
+console.log('✓ recurring items: validation, 9:00 in its timezone, run now, {date}, skip-if-open, one catch-up after downtime');
+
 // ---- Project settings: columns (rename carries items, removal needs empty), delete ----
 await assert.rejects(api('POST', `/api/orgs/${org}/projects`, { name: 'x', key: 'SETTINGS' }), /reserved/);
 const ops = await api('POST', `/api/orgs/${org}/projects`, { name: 'Ops', key: 'OPS' });
 const inReview = await api('POST', `/api/projects/${org}/OPS/items`, { type: 'issue', title: 'Check backups', status: 'Review' });
+const opsSchedule = await api('POST', `/api/projects/${org}/OPS/schedules`, { ...scheduleIn, status: 'Review', enabled: false });
 const doneItem = await api('POST', `/api/projects/${org}/OPS/items`, { type: 'issue', title: 'Old chore', status: 'Done' });
 assert.equal(ops.columns.join(','), 'Backlog,Todo,In progress,Review,Done');
 await assert.rejects(
@@ -304,6 +342,7 @@ await api('PATCH', `/api/projects/${org}/OPS`, {
   ],
 });
 assert.equal((await api('GET', `/api/items/${inReview.ref}`)).item.status, 'QA');
+assert.equal((await api('GET', `/api/projects/${org}/OPS/schedules`)).find((x: any) => x.id === opsSchedule.id).status, 'QA', 'schedules follow renames');
 assert.equal((await api('GET', `/api/items/${doneItem.ref}`)).item.done, false, '"Done" is no longer the last column');
 cookie = '';
 await api('POST', '/auth/dev', { email: `dave-${run}@example.com` });
@@ -314,6 +353,7 @@ cookie = daveCookie;
 await api('POST', '/auth/dev', { email: `dave-${run}@example.com` }); // accepts the invite as a member
 await assert.rejects(api('PATCH', `/api/projects/${org}/OPS`, { guidelines: 'nope' }), /Requires an org admin/);
 await assert.rejects(api('PATCH', `/api/orgs/${org}`, { name: 'nope' }), /Requires an org admin/);
+await assert.rejects(api('POST', `/api/projects/${org}/OPS/schedules`, scheduleIn), /Requires an org admin/);
 cookie = aliceCookieForSettings;
 await assert.rejects(api('DELETE', `/api/projects/${org}/OPS`, { confirm: 'WEB' }), /Type the project key/);
 await api('DELETE', `/api/projects/${org}/OPS`, { confirm: 'ops' });
@@ -388,4 +428,5 @@ await assert.rejects(api('GET', `/api/items/${opsIssue.ref}`), /404/);
 console.log('✓ org isolation');
 
 hook.close();
+await db.end();
 console.log('\nall smoke checks passed');

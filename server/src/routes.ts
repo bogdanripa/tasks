@@ -7,6 +7,7 @@ import * as d from './domain.js';
 import { config } from './config.js';
 import { ROUTINE_INSTRUCTIONS } from './routine.js';
 import { fullReference, route } from './apidoc.js';
+import * as sched from './schedules.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
@@ -210,6 +211,40 @@ export function apiRoutes(app: FastifyInstance) {
     const project = await d.resolveProject(await requireActor(req), `${req.params.org}/${req.params.key}`);
     return d.timeline(project, { before: query.before });
   });
+
+  // ---- recurring items ----
+  const scheduleBody = z.object({
+    name: z.string().min(1).max(80),
+    cron: z.string().min(9).max(100).describe('5-field cron, e.g. "0 9 * * *" = every day at 9:00'),
+    timezone: z.string().min(1).max(60).describe('IANA timezone, e.g. Europe/Bucharest'),
+    enabled: z.boolean().optional(),
+    title: z.string().min(1).max(300).describe('{date} and {weekday} are filled in'),
+    body: z.string().max(50_000).optional().describe('Markdown; {date} and {weekday} are filled in'),
+    status: z.string().nullable().optional().describe('column to add it to; defaults to the first'),
+    assignee: assignee,
+    parent: z.string().nullable().optional().describe('issue ref: create a task under it instead of an issue'),
+    skipIfOpen: z.boolean().optional().describe('skip a run while the previous item is still open'),
+  });
+  route(app, 'GET', '/api/projects/:org/:key/schedules', { section: 'Recurring items', summary: 'a project’s recurring schedules' }, async (req) =>
+    sched.listSchedules(await requireActor(req), `${req.params.org}/${req.params.key}`),
+  );
+  route(app, 'POST', '/api/projects/:org/:key/schedules', {
+    section: 'Recurring items',
+    summary: 'create a schedule that adds an item on a timer (admins)',
+    body: scheduleBody,
+  }, async (req, { body }) => sched.createSchedule(await requireActor(req), `${req.params.org}/${req.params.key}`, body));
+  route(app, 'PATCH', '/api/schedules/:id', {
+    section: 'Recurring items',
+    summary: 'replace a schedule’s settings (admins); you become its owner',
+    body: scheduleBody,
+  }, async (req, { body }) => sched.updateSchedule(await requireActor(req), req.params.id, body));
+  route(app, 'DELETE', '/api/schedules/:id', { section: 'Recurring items', summary: 'delete a schedule (admins)' }, async (req) => {
+    await sched.deleteSchedule(await requireActor(req), req.params.id);
+    return { ok: true };
+  });
+  route(app, 'POST', '/api/schedules/:id/run', { section: 'Recurring items', summary: 'run a schedule now (admins)' }, async (req) =>
+    sched.runScheduleNow(await requireActor(req), req.params.id),
+  );
 
   // ---- items (refs contain a slash, so they are wildcard segments) ----
   route(app, 'POST', '/api/projects/:org/:key/items', {

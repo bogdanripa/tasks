@@ -5,6 +5,7 @@ import { useOrgName, useSession } from '../App';
 import { EditableMarkdown, ErrorNote, useFetch } from '../ui';
 import { FormModal } from './Org';
 import { NameField } from './OrgSettings';
+import { SchedulesSection } from './Schedules';
 
 type Column = { name: string; from: string | null; count: number };
 
@@ -63,6 +64,11 @@ export default function ProjectSettings() {
       <section>
         <h2>Board columns</h2>
         <ColumnsEditor key={project.columns.join('|')} columns={project.columns} items={items} onSave={(columns) => update({ columns })} />
+      </section>
+
+      <section>
+        <h2>Recurring tasks</h2>
+        <SchedulesSection org={org!} projectKey={key!} columns={project.columns} />
       </section>
 
       <section className="danger-zone">

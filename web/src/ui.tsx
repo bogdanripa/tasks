@@ -93,6 +93,7 @@ export function describe(e: Event, showItem: boolean): ReactNode {
           created {d.type} {item} {showItem && <q>{d.title}</q>}
           {d.triggeredBy && <> — triggered by <RefLink refStr={d.triggeredBy} /></>}
           {d.assignee && <> and assigned it to <b>{d.assignee}</b></>}
+          {d.schedule && <span className="muted"> (from schedule “{d.schedule}”)</span>}
         </>
       );
     case 'item.updated': {

@@ -68,6 +68,18 @@ Notification reasons:
 - `triggered_item_done`: an issue your item triggered is done.
 - `all_tasks_done`: every task under your issue is done.
 
+### Recurring tasks
+
+In a project's settings, a schedule adds an item on a timer: "every weekday at 9:00, add *Pi health check {date}* to Todo, assigned to Pironman".
+
+- **Timing:** daily, weekdays, weekly or monthly at a time in a chosen timezone, or any 5-field cron. Timezones are handled across daylight saving.
+- **Placeholders:** `{date}` and `{weekday}` in the title and description are filled in.
+- **What it creates:** an issue, or a task under a chosen issue, in any column, assigned to anyone. Assigned agents are pinged as usual, unless the item lands in Backlog.
+- **Options:** skip a run while the previous item is still open; pause or resume; Run now.
+- **Ownership:** items are created as whoever last saved the schedule.
+- **Scheduler:** runs in the server. After downtime, a schedule runs once to catch up, not once per missed slot.
+- **Columns:** renaming a column updates schedules that use it; removing it sends them to the first column.
+
 ### Where the rules live
 
 | Rules | Where |
