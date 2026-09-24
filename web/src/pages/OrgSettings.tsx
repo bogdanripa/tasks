@@ -129,6 +129,7 @@ export default function OrgSettings() {
           <h2>Agents</h2>
           <button className="small" onClick={() => setModal('agent')}>New agent</button>
         </div>
+        {!data.agentReady && <StarterTeam org={org!} onDone={reload} />}
         {agents.length === 0 && <p className="muted">No agents yet. Each agent gets its own identity and works through a Claude routine, a webhook or the MCP.</p>}
         <ul className="people">
           {agents.map((m: any) => (
@@ -254,6 +255,60 @@ export function NameField({ label, value, onSave, allowEmpty }: { label: string;
         </div>
       </label>
       <ErrorNote error={error} />
+    </form>
+  );
+}
+
+/** For an org without the product → build → QA team: add PM, Lead, Dev and QA, optionally run by Tasks. */
+function StarterTeam({ org, onDone }: { org: string; onDone: () => void }) {
+  const providers = useFetch<any[]>(`/api/orgs/${org}/ai-providers`).data ?? [];
+  const [providerId, setProviderId] = useState('');
+  const [model, setModel] = useState('');
+  const models = useFetch<string[]>(providerId ? `/api/orgs/${org}/ai-providers/${providerId}/models` : null).data ?? [];
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <form
+      className="starter-team stack"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError(null);
+        try {
+          await api('POST', `/api/orgs/${org}/starter-team`, { runtime: providerId ? { providerId, model } : null });
+          onDone();
+        } catch (err) {
+          setError((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <div>
+        <b>Add the starter team</b>
+        <p className="muted small">
+          PM (product), Lead (architecture, review), Dev (frontend, backend, db) and QA (qa), with their roles. New projects then come set up
+          for them: Todo goes to the PM, Review to the Lead, and the guidelines describe the flow.
+        </p>
+      </div>
+      <div className="branch-fields">
+        <label>
+          Run them in Tasks with
+          <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
+            <option value="">Don’t run them yet (connect each later)</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        </label>
+        {providerId && (
+          <label>
+            Model <span className="muted small">(needs tools; vision for QA screenshots)</span>
+            <input list="starter-models" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. gpt-5.6-luna" required />
+            <datalist id="starter-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
+          </label>
+        )}
+      </div>
+      <ErrorNote error={error} />
+      <div><button className="primary" disabled={busy}>{busy ? 'Adding…' : 'Add PM, Lead, Dev and QA'}</button></div>
     </form>
   );
 }

@@ -181,6 +181,11 @@ export function apiRoutes(app: FastifyInstance) {
     const agent = await d.createAgent(await requireActor(req), req.params.org, body);
     return { agent, key: await mintApiKey(agent.id, 'default') };
   });
+  route(app, 'POST', '/api/orgs/:org/starter-team', {
+    section: 'Agents',
+    summary: 'add the starter team (PM, Lead, Dev, QA) with skills and roles, skipping names already taken; optionally run them in Tasks (admins)',
+    body: z.object({ runtime: z.object({ providerId: z.string(), model: z.string().min(1) }).nullable().optional() }),
+  }, async (req, { body }) => d.addStarterTeam(await requireActor(req), req.params.org, body.runtime));
   route(app, 'GET', '/api/agents/:id', { section: 'Agents', summary: 'an agent’s settings, keys, runs, queue and recent notifications (admins)' }, async (req) => {
     const agent = await d.requireAgentAdmin(await requireActor(req), req.params.id);
     const [deliveries, runs, [queue], [pause]] = await Promise.all([

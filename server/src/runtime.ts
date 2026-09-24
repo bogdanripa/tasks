@@ -350,7 +350,9 @@ async function execute(run: InHouseRun) {
     });
     void result;
   } catch (e) {
-    const err = e as Error & { statusCode?: number };
+    // The SDK wraps provider errors after its own retries; the last one says what happened.
+    const err = ((e as { lastError?: unknown }).lastError ?? e) as Error & { statusCode?: number; responseBody?: string };
+    if (outOfCredits(err)) return stopForCredits(run, actor, provider, err.message);
     const transient = !err.statusCode || err.statusCode === 429 || err.statusCode >= 500;
     return fail(run, `the model call failed: ${err.message}`, transient);
   } finally {
@@ -366,6 +368,49 @@ async function execute(run: InHouseRun) {
   // The model stopped without setting a status or ending the run: that's the end of this run.
   await logStep(run.runId, 'note', { text: 'The agent finished without changing the task’s status; the run is over.' });
   await d.endRun(actor);
+}
+
+const NO_CREDITS = /insufficient_quota|credit balance|exceeded your current quota|billing|payment required|prepayment|out of credits/i;
+const outOfCredits = (err: Error & { statusCode?: number; responseBody?: string }) =>
+  err.statusCode === 402 || NO_CREDITS.test(err.message) || NO_CREDITS.test(err.responseBody ?? '');
+
+/**
+ * The provider account is out of credits: retrying won't help, so a human gets a task to top it up (the one who
+ * added the key, else an owner), and that task blocks the item. Marking it done wakes the agent again. One open
+ * top-up task per provider, however many runs hit it.
+ */
+async function stopForCredits(run: InHouseRun, actor: Actor, provider: { id: string; label: string; createdBy?: string | null }, error: string) {
+  const title = `Top up credits for ${provider.label}: agents that run on it are stopped`;
+  let note = `the provider is out of credits: ${error}`;
+  try {
+    const item = await d.resolveItem(actor, run.itemId);
+    const [existing] = await sql`select id from item_view where org_id = ${run.agent.orgId} and title = ${title} and not done order by created_at limit 1`;
+    let blocker: string;
+    if (existing) {
+      blocker = existing.id;
+    } else {
+      const [human] = await sql`
+        select a.id from accounts a join memberships m on m.account_id = a.id and m.org_id = ${run.agent.orgId}
+        where a.kind = 'human' and a.deactivated_at is null
+        order by (a.id = ${provider.createdBy ?? null}) desc nulls last, (m.role = 'owner') desc, m.created_at limit 1`;
+      const issueId = item.type === 'issue' ? item.id : item.parentId;
+      const task = await d.createItem(actor, await d.resolveProject(actor, item.projectId), {
+        type: 'task',
+        parentRef: issueId,
+        title,
+        assignee: human?.id,
+        body: `The **${provider.label}** account ran out of credits, so agents running on it can't work. The provider said:\n\n> ${error.replace(/\n/g, ' ').slice(0, 500)}\n\nAdd credits (or put a key with credits under Settings → AI providers), then mark this task done: the agents it blocks pick up where they stopped.`,
+      });
+      blocker = task.id;
+    }
+    await d.addLink(actor, blocker, item.id, 'blocks').catch(() => {}); // already linked
+    const [b] = await sql`select ref from item_view where id = ${blocker}`;
+    note = `${note} (waiting on ${b.ref})`;
+  } catch (e) {
+    console.error('out-of-credits task', e);
+  }
+  await logStep(run.runId, 'error', { text: `Out of credits: ${note}` });
+  await releaseRun({ id: run.runId, agentId: run.agent.id, itemId: run.itemId, keyId: run.keyId }, note);
 }
 
 /** A run that couldn't complete. Transient provider trouble puts its updates back in the queue (a few times). */

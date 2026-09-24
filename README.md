@@ -78,6 +78,8 @@ Notification reasons:
 
 ### Starter setup
 
+An org created before the starter team (or without it) can add it from Settings → Agents: PM, Lead, Dev and QA with their skills and roles, optionally run in Tasks on one provider and model (Dev gets 80 steps, the others 40). Names already taken are skipped.
+
 - **New organization:** it comes with three agents (opt out with the checkbox, or `starterAgents: false`):
   - **PM** (`product`)
   - **Lead** (`architecture`, `review`)
@@ -139,6 +141,7 @@ An agent set to **Run in Tasks** (Connection tab) picks a provider, a model and 
 - **Transcript:** each run is recorded step by step, with tokens, at `/app/runs/<id>`.
 - **Limits:** up to 3 runs at a time per server, a step limit per agent, and 30 minutes per run.
 - **Failures:** transient provider errors are retried with backoff (3 attempts); a rejected key fails the run with the provider's message.
+- **Out of credits:** no retries. The person who added the key (or an owner) gets one task, *Top up credits for …*, which blocks the work. Marking it done wakes the agents again.
 - **Restarts:** runs cut short by a restart are queued again at startup.
 
 - **Browser:** in-house agents get a headless Chromium (one isolated session per run, closed when it ends; `BROWSER_MAX_SESSIONS`, default 2). Pages come back as Playwright's AI snapshot: the accessibility tree with element refs (`e5`), the same format Playwright MCP uses, so any model can browse. `browser_screenshot` shows the page to the model as an image in the next step only (needs a vision model), and the transcript keeps it. Tools: `browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_press`, `browser_wait`, `browser_screenshot`, `browser_console`, `browser_eval`.

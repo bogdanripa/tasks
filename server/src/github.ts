@@ -40,7 +40,7 @@ export async function ghFetch(path: string, init: RequestInit & { token: string 
     throw new HttpError(502, `GitHub unreachable: ${fetchError(e)}`);
   }
   const body = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new HttpError(res.status === 404 ? 404 : 400, `GitHub: ${(body as any)?.message ?? `HTTP ${res.status}`}`);
+  if (!res.ok) throw new HttpError(res.status === 404 || res.status === 409 ? res.status : 400, `GitHub: ${(body as any)?.message ?? `HTTP ${res.status}`}`);
   return body as any;
 }
 
@@ -160,23 +160,32 @@ export function repoOps(r: RunRepo) {
   const api = (path: string, init: Omit<RequestInit, 'body'> & { body?: unknown } = {}) =>
     ghFetch(`/repos/${r.repo}${path}`, { ...init, body: init.body === undefined ? undefined : JSON.stringify(init.body), token: r.token });
   const branchSha = async (branch: string) => (await api(`/git/ref/heads/${enc(branch)}`)).object.sha as string;
-  /** Create a branch from another if it doesn't exist; a missing base branch (e.g. dev) starts from the repo's default. */
-  const ensureBranch = async (branch: string, from: string): Promise<void> => {
+  const exists = async (branch: string) => {
     try {
       await branchSha(branch);
+      return true;
     } catch (e) {
-      if ((e as HttpError).status !== 404) throw e;
-      if (branch === from) {
-        const { default_branch } = await api('');
-        if (default_branch === branch) throw e; // an empty repository
-        return ensureBranch(branch, default_branch);
-      }
-      await ensureBranch(from, r.base);
-      await api('/git/refs', { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: await branchSha(from) } });
+      if ((e as HttpError).status === 404 || (e as HttpError).status === 409) return false; // 409: an empty repository
+      throw e;
     }
+  };
+  /**
+   * Make sure a branch exists, creating it from another. A missing source (e.g. dev, not created yet) starts
+   * from the repository's default branch, and a brand-new empty repository gets a first commit.
+   */
+  const ensureBranch = async (branch: string, from: string) => {
+    if (await exists(branch)) return;
+    const def: string = (await api('')).default_branch;
+    if (!(await exists(def))) {
+      await api('/contents/README.md', { method: 'PUT', body: { message: 'Initial commit', content: Buffer.from(`# ${r.repo.split('/')[1]}\n`).toString('base64') } });
+    }
+    if (branch === def) return;
+    const source = (await exists(from)) ? from : def;
+    await api('/git/refs', { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: await branchSha(source) } });
   };
   return {
     async listFiles(ref?: string) {
+      if (!(await exists(ref ?? r.base))) return { files: [], note: `branch ${ref ?? r.base} doesn't exist yet (it's created on the first write)` };
       const tree = await api(`/git/trees/${enc(ref ?? r.base)}?recursive=1`);
       return tree.tree.filter((t: any) => t.type === 'blob').map((t: any) => t.path);
     },

@@ -4,7 +4,7 @@ import type { Actor } from './auth.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { encrypt } from './crypto.js';
 import { config } from './config.js';
-import { agentReady, PIPELINE_TEMPLATE, seedStarterAgents } from './starter.js';
+import { agentReady, PIPELINE_TEMPLATE, seedStarterAgents, STARTER_AGENTS } from './starter.js';
 import { canUseTools } from './llm.js';
 
 export type Role = 'owner' | 'admin' | 'member';
@@ -439,6 +439,27 @@ export async function createAgent(actor: Actor, slug: string, input: { name: str
     await emit(tx, { orgId: org.id, actorId: actor.id, type: 'agent.created', data: { agentId: agent.id, name: agent.name } });
     return agent;
   });
+}
+
+/**
+ * Add the starter team (PM, Lead, Dev, QA) to an existing org, skipping names already taken. With a runtime, Tasks
+ * runs them itself on that provider and model (the developer gets a higher step limit: every file is a step).
+ */
+export async function addStarterTeam(actor: Actor, slug: string, runtime?: { providerId: string; model: string } | null) {
+  const org = await resolveOrg(actor, slug, true);
+  const taken = new Set(
+    (await sql`select lower(a.name) as n from accounts a join memberships m on m.account_id = a.id and m.org_id = ${org.id} where a.deactivated_at is null`).map((r) => r.n),
+  );
+  const created: { id: string; name: string }[] = [];
+  for (const a of STARTER_AGENTS) {
+    if (taken.has(a.name.toLowerCase())) continue;
+    const agent = await createAgent(actor, slug, { name: a.name });
+    await sql`update accounts set description = ${a.description} where id = ${agent.id}`;
+    await sql`update memberships set skills = ${a.skills} where org_id = ${org.id} and account_id = ${agent.id}`;
+    if (runtime) await updateAgent(actor, agent.id, { runtime: { ...runtime, maxSteps: a.skills.includes('backend') ? 80 : 40 } });
+    created.push({ id: agent.id, name: a.name });
+  }
+  return { created, agentReady: await agentReady(sql, org.id) };
 }
 
 /** Agents are managed by admins of their home org. */

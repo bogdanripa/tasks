@@ -417,7 +417,7 @@ const llmServer = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const send = (code: number, obj: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'text-embedding-3-small'].map((id) => ({ id })) });
+    if (req.url === '/v1/models') return send(200, { data: ['fake-worker', 'fake-idle', 'fake-loop', 'fake-401', 'fake-dev', 'fake-qa', 'fake-pm', 'fake-broke', 'text-embedding-3-small'].map((id) => ({ id })) });
     const b = JSON.parse(body);
     modelCalls[b.model] = (modelCalls[b.model] ?? 0) + 1;
     const userText = b.messages.find((m: any) => m.role === 'user')?.content;
@@ -435,6 +435,7 @@ const llmServer = http.createServer((req, res) => {
       usage: { prompt_tokens: 50, completion_tokens: 5, total_tokens: 55 },
     });
     if (b.model === 'fake-401') return send(401, { error: { message: 'Incorrect API key provided' } });
+    if (b.model === 'fake-broke') return send(429, { error: { message: 'You exceeded your current quota, please check your plan and billing details.', type: 'insufficient_quota' } });
     if (b.model === 'fake-idle') return say('Nothing to do.');
     if (b.model === 'fake-loop') return call('get_item', { ref });
     if (b.model === 'fake-dev') {
@@ -450,6 +451,15 @@ const llmServer = http.createServer((req, res) => {
       ];
       if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
       return say('Shipped.');
+    }
+    if (b.model === 'fake-pm') {
+      const steps: [string, unknown][] = [
+        ['repo_list_files', {}],
+        ['repo_write_files', { branch: 'dev', message: 'Spec', files: [{ path: `specs/${ref?.split('/')[1]}.md`, content: '# Pong spec' }] }],
+        ['update_item', { ref, status: 'Done' }],
+      ];
+      if (toolsSoFar < steps.length) return call(...steps[toolsSoFar]);
+      return say('Specced.');
     }
     if (b.model === 'fake-qa') {
       const images = b.messages.flatMap((m: any) => (Array.isArray(m.content) ? m.content : [])).filter((p: any) => p.type === 'image_url').length;
@@ -505,7 +515,7 @@ assert.deepEqual(transcript.steps.filter((s: any) => s.kind === 'tool_call').map
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
 const idle = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Nothing to do here', status: 'Todo', assignee: house.agent.id });
 const runFor = async (ref: string) => {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 250; i++) {
     const r = (await api('GET', `/api/agents/${house.agent.id}`)).runs.find((x: any) => x.itemRef === ref);
     if (r?.finishedAt) return r;
     await new Promise((res) => setTimeout(res, 100));
@@ -522,6 +532,7 @@ const refused = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'iss
 assert.match((await runFor(refused.ref)).error, /model call failed.*Incorrect API key/);
 // ---- GitHub: install (verified), project repository, per-run repo access, webhooks ----
 const repoFiles: Record<string, Record<string, string>> = { main: { 'README.md': '# pong' } };
+const repos: Record<string, Record<string, Record<string, string>>> = { pong: repoFiles, fresh: {} }; // fresh: a brand-new empty repo
 const ghCalls: string[] = [];
 let tokenRequests: any[] = [];
 const ghServer = http.createServer((req, res) => {
@@ -534,27 +545,33 @@ const ghServer = http.createServer((req, res) => {
     const b = body ? JSON.parse(body) : {};
     ghCalls.push(`${req.method} ${p}`);
     if (req.method === 'POST' && /^\/app\/installations\/777\/access_tokens$/.test(p)) { tokenRequests.push(b); return send(201, { token: `ghs_run${tokenRequests.length}`, expires_at: new Date(Date.now() + 3600_000).toISOString() }); }
-    if (p === '/installation/repositories') return send(200, { repositories: [{ full_name: 'octo/pong' }] });
+    if (p === '/installation/repositories') return send(200, { repositories: [{ full_name: 'octo/pong' }, { full_name: 'octo/fresh' }] });
     if (p === '/login/oauth/access_token') return send(200, b.code === 'good' ? { access_token: 'gho_user' } : { error: 'bad_verification_code' });
     if (p === '/user/installations') return send(200, { installations: [{ id: 777, account: { login: 'octo', type: 'User' } }] });
-    const m = /^\/repos\/octo\/pong(\/.*)$/.exec(p);
+    const m = /^\/repos\/octo\/(pong|fresh)(\/.*)?$/.exec(p);
     if (!m) return send(404, { message: 'Not Found' });
-    const rest = m[1];
+    const files = repos[m[1]];
+    const rest = m[2] ?? '';
+    const empty = !Object.keys(files).length;
+    if (rest === '') return send(200, { default_branch: 'main' });
+    if (empty && rest.startsWith('/git/')) return send(409, { message: 'Git Repository is empty.' });
     let r: RegExpExecArray | null;
-    if ((r = /^\/git\/ref\/heads\/(.+)$/.exec(rest))) return repoFiles[decodeURIComponent(r[1])] ? send(200, { object: { sha: `sha-${r[1]}` } }) : send(404, { message: 'Not Found' });
-    if (rest === '/git/refs' && req.method === 'POST') { repoFiles[b.ref.replace('refs/heads/', '')] = { ...repoFiles.main }; return send(201, {}); }
-    if ((r = /^\/git\/trees\/(.+)$/.exec(rest))) return send(200, { tree: Object.keys(repoFiles[decodeURIComponent(r[1])] ?? {}).map((path) => ({ type: 'blob', path })) });
+    if ((r = /^\/git\/ref\/heads\/(.+)$/.exec(rest))) return files[decodeURIComponent(r[1])] ? send(200, { object: { sha: `sha-${r[1]}` } }) : send(404, { message: 'Not Found' });
+    if (rest === '/git/refs' && req.method === 'POST') { files[b.ref.replace('refs/heads/', '')] = { ...files.main }; return send(201, {}); }
+    if ((r = /^\/git\/trees\/(.+)$/.exec(rest))) return send(200, { tree: Object.keys(files[decodeURIComponent(r[1])] ?? {}).map((path) => ({ type: 'blob', path })) });
     if ((r = /^\/contents\/(.+)$/.exec(rest))) {
       const path = decodeURIComponent(r[1]);
       if (req.method === 'GET') {
-        const f = repoFiles[url.searchParams.get('ref') ?? 'main']?.[path];
+        const f = files[url.searchParams.get('ref') ?? 'main']?.[path];
         return f === undefined ? send(404, { message: 'Not Found' }) : send(200, { content: Buffer.from(f).toString('base64'), sha: 'filesha' });
       }
-      repoFiles[b.branch][path] = Buffer.from(b.content, 'base64').toString('utf8');
+      const branch = b.branch ?? 'main';
+      if (!files[branch] && empty && branch === 'main') files.main = {};
+      files[branch][path] = Buffer.from(b.content, 'base64').toString('utf8');
       return send(200, { commit: { sha: 'c1' } });
     }
-    if (rest === '/pulls' && req.method === 'POST') { (repoFiles as any).__pr = b.head; return send(201, { number: 1, html_url: 'https://github.com/octo/pong/pull/1' }); }
-    if (rest === '/pulls/1/merge') { Object.assign(repoFiles.main, repoFiles[(repoFiles as any).__pr]); return send(200, { merged: true }); }
+    if (rest === '/pulls' && req.method === 'POST') { (files as any).__pr = b.head; return send(201, { number: 1, html_url: 'https://github.com/octo/pong/pull/1' }); }
+    if (rest === '/pulls/1/merge') { Object.assign(files.main, files[(files as any).__pr]); return send(200, { merged: true }); }
     if (rest === '/pages' && req.method === 'POST') return send(201, {});
     if (rest === '/pages') return send(200, { html_url: 'https://octo.github.io/pong/', status: 'built' });
     return send(404, { message: 'Not Found' });
@@ -572,7 +589,7 @@ assert.match(await callback('code=good&installation_id=777', cookie), /github_er
 assert.equal(await callback('code=good&installation_id=777&setup_action=install'), `/app/${org}/settings?tab=github`);
 const ghState = await api('GET', `/api/orgs/${org}/github`);
 assert.equal(ghState.account, 'octo');
-assert.deepEqual(ghState.repos, ['octo/pong']);
+assert.deepEqual(ghState.repos, ['octo/fresh', 'octo/pong']);
 await assert.rejects(api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/secret' }), /can’t access octo\/secret/);
 await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong' });
 // In-house developer: builds on a branch, opens a PR, merges it, publishes Pages, comments the URL.
@@ -591,6 +608,19 @@ assert.match(devPrompt, /Repository: https:\/\/github\.com\/octo\/pong\. Branch:
 await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'dev', prod: 'main' });
 const projRepo = (await api('GET', `/api/projects/${org}/WEB`)).project;
 assert.deepEqual([projRepo.githubBase, projRepo.githubProd], ['dev', 'main']);
+// A brand-new empty repository: the PM's first commit (a spec on dev) creates main, then dev from it.
+await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/fresh', base: 'dev', prod: 'main' });
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-pm', maxSteps: 10 } });
+const specItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Pong from nothing', status: 'Todo', assignee: house.agent.id });
+const specRun = await runFor(specItem.ref);
+assert.equal(specRun.error, null);
+const specSteps = (await api('GET', `/api/runs/${specRun.id}`)).steps.filter((s: any) => s.kind === 'tool_result');
+assert.match(specSteps[0].content.output, /doesn't exist yet/);
+assert.doesNotMatch(specSteps[1].content.output, /error/);
+assert.deepEqual(Object.keys(repos.fresh).sort(), ['dev', 'main']);
+assert.ok(repos.fresh.main['README.md'] && repos.fresh.dev[`specs/${specItem.ref.split('/')[1]}.md`]);
+assert.equal((await api('GET', `/api/items/${specItem.ref}`)).item.status, 'Done');
+await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong', base: 'main', prod: 'main' });
 assert.match(devPrompt, /repo_write_files/);
 // Webhooks: PRs and commits that mention an item land in its history; bad signatures are refused.
 const ghHook = async (event: string, payload: unknown, secret = 'test-webhook-secret') => {
@@ -634,6 +664,25 @@ assert.equal(imagesSeen.filter((n) => n > 0).length, 1, 'a screenshot is shown o
 assert.match((await api('GET', `/api/runs/${qaRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text, /browser_\* tools are a real browser/);
 site.close();
 console.log('✓ agent browser: accessibility snapshot with refs, click, keys, screenshot shown once, console, eval, private addresses refused');
+
+// ---- Out of credits: no retries; a human gets one top-up task that blocks the work, and finishing it resumes ----
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-broke' } });
+const broke1 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Needs credits 1', status: 'Todo', assignee: house.agent.id });
+assert.match((await runFor(broke1.ref)).error, /out of credits.*waiting on/);
+const broke2 = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Needs credits 2', status: 'Todo', assignee: house.agent.id });
+assert.match((await runFor(broke2.ref)).error, /out of credits/);
+const topUps = (await api('GET', `/api/search?q=${encodeURIComponent('Top up credits for Fake')}`)).filter((i: any) => !i.done);
+assert.equal(topUps.length, 1, 'one top-up task, however many runs hit it');
+const topUp = await api('GET', `/api/items/${topUps[0].ref}`);
+assert.equal(topUp.item.assigneeKind, 'human');
+const blocked = (await api('GET', `/api/items/${broke2.ref}`)).item;
+assert.ok(blocked.blockedBy?.length || (await api('GET', `/api/items/${broke2.ref}`)).links.some((l: any) => l.kind === 'blocks'), 'the top-up task blocks the work');
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
+const runsBefore = (await api('GET', `/api/agents/${house.agent.id}`)).runs.length;
+await api('PATCH', `/api/items/${topUps[0].ref}`, { status: 'Done' });
+for (let i = 0; i < 80 && (await api('GET', `/api/agents/${house.agent.id}`)).runs.filter((r: any) => r.finishedAt).length < runsBefore + 2; i++) await new Promise((r) => setTimeout(r, 100));
+assert.ok((await api('GET', `/api/agents/${house.agent.id}`)).runs.length >= runsBefore + 2, 'topping up wakes the agent on both items');
+console.log('✓ out of credits: no retries, one top-up task for a human that blocks the work, done → agents resume');
 
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
@@ -860,6 +909,18 @@ assert.deepEqual(blank.columnSkills, {});
 assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: 'Plain' })).guidelines, '', 'orgs without product+build+qa get blank projects');
 await api('DELETE', `/api/orgs/${starter}`, { confirm: starter });
 console.log('✓ starter setup: new org gets PM/Lead/Dev/QA; its projects route Todo to the PM and start from the pipeline guidelines');
+// An existing org without the team adds it later, run by Tasks on one provider and model.
+const lateOrg = `late-${run}`;
+await api('POST', '/api/orgs', { slug: lateOrg, name: 'Late', starterAgents: false });
+assert.equal((await api('GET', `/api/orgs/${lateOrg}`)).agentReady, false);
+await api('POST', `/api/orgs/${lateOrg}/agents`, { name: 'QA' }); // a name already taken is skipped
+const lateProv = await api('POST', `/api/orgs/${lateOrg}/ai-providers`, { provider: 'openai-compatible', apiKey: 'sk-test-key', baseUrl: 'http://localhost:4557/v1' }).catch(() => null);
+const team = await api('POST', `/api/orgs/${lateOrg}/starter-team`, { runtime: lateProv ? { providerId: lateProv.id, model: 'fake-idle' } : null });
+assert.deepEqual(team.created.map((a: any) => a.name), ['PM', 'Lead', 'Dev']);
+const devAgent = await api('GET', `/api/agents/${team.created[2].id}`);
+if (lateProv) assert.deepEqual([devAgent.runtime?.model, devAgent.runtime?.maxSteps], ['fake-idle', 80]);
+assert.equal((await api('POST', `/api/orgs/${lateOrg}/starter-team`, {})).created.length, 0);
+console.log('✓ starter team for an existing org: skips taken names, runs in Tasks with one model');
 
 // Deleting an org: owner + typed slug; cascades, cleans up cross-org links, revokes its agents.
 const other = `other-${run}`;
