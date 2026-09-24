@@ -136,7 +136,9 @@ const SELF_NOTIFY = new Set(['assigned', 'unblocked', 'all_tasks_done', 'trigger
 async function notify(tx: Db, accountId: string | null | undefined, eventId: number, itemId: string | null, reason: string, actor: Actor) {
   if (!accountId) return;
   if (accountId === actor.id && !(actor.kind === 'agent' && SELF_NOTIFY.has(reason))) return;
-  const quiet = `${config.agentQuietSeconds} seconds`;
+  // The quiet period lets a person finish a burst of edits. An agent's changes don't need it: they're held
+  // until the run that made them ends instead (see the delivery queue), then go out right away.
+  const quiet = `${actor.kind === 'agent' ? 0 : config.agentQuietSeconds} seconds`;
   // Agents get their updates delivered; people who set up alerts get the ones that need them.
   const alert = isAlert(reason, actor);
   const [row] = await tx`

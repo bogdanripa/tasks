@@ -51,6 +51,8 @@ export type Pending = {
   runtimeProviderId: string | null;
   runtimeModel: string | null;
   runtimeMaxSteps: number;
+  actorId: string;
+  actorKind: 'human' | 'agent';
 };
 
 /** A run that never calls Tasks within this long is released (usually the routine's network allowlist). */
@@ -358,7 +360,15 @@ export async function processRoutineQueue(rows: Pending[]) {
     // Waiting on an unfinished blocker: no runs. The last blocker finishing sends "unblocked", which starts one.
     const blocked = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && r.itemBlocked);
     if (blocked.length) await markRows(blocked.map((r) => r.id), 'skipped', 'blocked');
-    const live = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && !blocked.includes(r));
+    const ready = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && !blocked.includes(r));
+    // Changes another agent made mid-run wait for that run to end: it may still be linking or editing them.
+    const makers = [...new Set(ready.filter((r) => r.actorKind === 'agent' && r.actorId !== agentId).map((r) => r.actorId))];
+    const running = makers.length
+      ? new Set((await sql`select distinct agent_id from agent_runs where agent_id in ${sql(makers)} and finished_at is null and status = 'fired'`).map((x) => x.agentId))
+      : new Set<string>();
+    const held = ready.filter((r) => r.actorKind === 'agent' && running.has(r.actorId));
+    if (held.length) await defer(held.map((r) => r.id), new Date(Date.now() + 5_000));
+    const live = ready.filter((r) => !held.includes(r));
     if (!live.length) continue;
 
     const busy = await agentBusyUntil(agentId, live[0].agentOrgId);

@@ -28,7 +28,7 @@ async function deliverDue() {
            v.closed_at is not null as item_closed,
            exists (select 1 from links l join items b on b.id = l.from_id
                    where l.to_id = n.item_id and l.kind = 'blocks' and l.removed_at is null and b.closed_at is null) as item_blocked,
-           e.type as event_type, e.data as event_data, actor.name as actor_name, actor.kind as actor_kind,
+           e.type as event_type, e.data as event_data, actor.id as actor_id, actor.name as actor_name, actor.kind as actor_kind,
            v.ref as item_ref, v.title as item_title, v.type as item_type, v.status as item_status
     from notifications n
     join accounts a on a.id = n.account_id
