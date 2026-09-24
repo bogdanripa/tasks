@@ -740,6 +740,9 @@ export async function listItems(project: Row, f: { status?: string; type?: ItemT
   return sql`
     select v.id, v.ref, v.number, v.type, v.title, v.status, v.position, v.assignee_id, v.assignee_name, v.assignee_kind, v.skill,
            ${workingSql(sql`v.id`)} as working, ${blockersSql(sql`v.id`)} as blocked_by,
+           -- An update waiting for the assigned agent: when its run is due (quiet period, or the agent is busy).
+           (select min(n.next_attempt_at) from notifications n
+            where n.item_id = v.id and n.account_id = v.assignee_id and n.delivery_status = 'pending') as starts_at,
            v.parent_id, par.ref as parent_ref, v.done, v.created_at, v.updated_at,
            (select count(*)::int from items c where c.parent_id = v.id) as tasks_total,
            (select count(*)::int from items c where c.parent_id = v.id and c.closed_at is not null) as tasks_done,

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { itemPath, type Item } from '../api';
-import { Avatar, SkillChip, Time } from '../ui';
+import { Avatar, SkillChip, StartsSoon, Time } from '../ui';
 
 type Row = Item & { updatedAt?: string; parentId?: string | null };
 type SortKey = 'status' | 'updated' | 'ref' | 'assignee';
@@ -86,6 +86,7 @@ export function ItemTable({ items, columns, flat }: { items: Row[]; columns: str
                 {i.title}
                 {!nested && i.parentRef && <span className="muted small"> · {i.parentRef.split('/')[1]}</span>}
                 {i.working && <span className="working"> working</span>}
+                {!i.working && i.startsAt && !i.blockedBy?.length && !i.done && <> <StartsSoon at={i.startsAt} /></>}
                 {!i.done && !!i.blockedBy?.length && <span className="pill" title={`Waiting on ${i.blockedBy.join(', ')}`}> ⏸ blocked</span>}
                 {!!i.tasksTotal && <span className="muted small"> ☑ {i.tasksDone}/{i.tasksTotal}</span>}
               </td>

@@ -343,3 +343,21 @@ export function SkillsEditor({ value, suggestions, onSave }: { value: string[]; 
     </form>
   );
 }
+
+/**
+ * An agent will pick this up soon: counts down the quiet period (people may still be editing), then says
+ * "queued" while the agent finishes other work.
+ */
+export function StartsSoon({ at }: { at: string }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const left = Math.ceil((new Date(at).getTime() - now) / 1000);
+  const label = left > 0 ? `starting in ${left >= 60 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left}s`}` : 'queued';
+  const title = left > 0
+    ? 'An agent will start on this after a short quiet period, so any edits you are still making reach it together'
+    : 'Waiting for the agent to finish its current work';
+  return <span className="starting" title={title}>{label}</span>;
+}
