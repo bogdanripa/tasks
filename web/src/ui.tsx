@@ -102,6 +102,7 @@ export function describe(e: Event, showItem: boolean): ReactNode {
       if (c.status) parts.push(<>moved {item} from <b>{c.status[0]}</b> to <b>{c.status[1]}</b></>);
       if (c.assignee && d.handoff) parts.push(<>handed {item || 'it'} to <b>{c.assignee[1]}</b> for {d.handoff}</>);
       else if (c.assignee && d.returned) parts.push(<>sent {item || 'it'} back to <b>{c.assignee[1]}</b> with changes requested</>);
+      else if (c.assignee && d.byReply) parts.push(<>took {item || 'it'} by replying</>);
       else if (c.assignee) parts.push(c.assignee[1] ? <>assigned {item} to <b>{c.assignee[1]}</b></> : <>unassigned {item}</>);
       if (c.title) parts.push(<>renamed {item} to <q>{c.title[1]}</q></>);
       if (c.body) parts.push(<>edited the description{showItem && <> of {item}</>}</>);

@@ -815,6 +815,14 @@ assert.match(valPrompt, /- staging_url = https:\/\/pong-staging\.example\.com/);
 assert.equal((await api('GET', `/api/projects/${org}/WEB/values`)).find((v: any) => v.key === 'production_url')?.value, 'https://pong.example.com', 'agents save values with a tool');
 console.log('✓ project values: anyone sets and deletes, timeline, every run sees them, agents save them');
 
+// A person replying on an unassigned item takes it; an assigned one keeps its assignee.
+const loose = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Nobody owns this', status: 'Backlog' });
+await api('POST', `/api/comments/${loose.ref}`, { body: 'I will look at it' });
+const looseNow = await api('GET', `/api/items/${loose.ref}`);
+assert.equal(looseNow.item.assigneeKind, 'human');
+assert.ok(looseNow.history.some((e: any) => e.data?.byReply));
+console.log('✓ replying on an unassigned item assigns it to the person');
+
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
 assert.equal((await api('GET', `/api/agents/${house.agent.id}`)).agent.runtime, null);
