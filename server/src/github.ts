@@ -311,9 +311,17 @@ export function repoOps(r: RunRepo) {
       const pr = await api('/pulls', { method: 'POST', body: { head: branch, base: into, title, body } });
       return { number: pr.number, url: pr.html_url };
     },
+    /**
+     * Merge a pull request. Work branches are squashed; a pull request between long-lived branches (a release
+     * from the development branch to the production one) gets a merge commit, because squashing it would leave
+     * the two branches with different histories and make the next release conflict.
+     */
     async mergePullRequest(number: number) {
-      await api(`/pulls/${number}/merge`, { method: 'PUT', body: { merge_method: 'squash' } });
-      return { merged: true };
+      const pr = await api(`/pulls/${number}`);
+      const longLived = new Set([r.base, r.prod]);
+      const method = longLived.has(pr.head?.ref) && longLived.has(pr.base?.ref) ? 'merge' : 'squash';
+      await api(`/pulls/${number}/merge`, { method: 'PUT', body: { merge_method: method } });
+      return { merged: true, method };
     },
     /** Publish a branch (default the base branch) with GitHub Pages and return the site URL. */
     async publishPages(branch = r.base, path: '/' | '/docs' = '/') {

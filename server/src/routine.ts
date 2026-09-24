@@ -119,8 +119,12 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
       return `${who} finished it and moved it to review: it's yours to review`;
     case 'changes_requested':
       return `${who} reviewed it and sent it back to you with changes requested (see their comment)`;
-    case 'unblocked':
-      return `${d.ref} ${q(d.title ?? '')}, which blocked this, is done`;
+    case 'unblocked': {
+      const said = c.blockerComment
+        ? `. Its last comment, from ${c.blockerCommentAuthor}:\n${String(c.blockerComment).slice(0, commentLimit).split('\n').map((l: string) => `    > ${l}`).join('\n')}`
+        : '';
+      return `${d.ref} ${q(d.title ?? '')}, which blocked this, is done${said}`;
+    }
     case 'triggered_item_done':
       return `${d.ref} ${q(d.title ?? '')}, which this triggered, is done`;
     case 'stalled':
@@ -411,9 +415,16 @@ async function fireRoutine(rows: Pending[]) {
     from projects p join orgs o on o.id = p.org_id where p.id = ${item.projectId}`;
   const [parent] = item.parentId ? await sql`select ref, title from item_view where id = ${item.parentId}` : [];
   const changes = await sql`
-    select n.reason, e.data, a.name as actor_name, cm.body as comment_body from notifications n
+    select n.reason, e.data, a.name as actor_name, cm.body as comment_body,
+           last.body as blocker_comment, last.author as blocker_comment_author
+    from notifications n
     join events e on e.id = n.event_id join accounts a on a.id = e.actor_id
     left join comments cm on cm.id = (e.data->>'commentId')::uuid
+    -- For "unblocked": the blocker's last comment (often a human's answer to this agent's question).
+    left join lateral (
+      select c.body, ca.name as author from comments c join accounts ca on ca.id = c.author_id
+      where n.reason = 'unblocked' and c.item_id = e.item_id order by c.created_at desc limit 1
+    ) last on true
     where n.id in ${sql(ids)} order by n.id`;
 
   const expiresAt = new Date(Date.now() + RUN_TOKEN_HOURS * 3600_000);

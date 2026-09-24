@@ -23,7 +23,8 @@ let active = 0;
 /** Runs this process is executing (never taken for dead here, however quiet). */
 const mine = new Set<string>();
 
-export const inHouseFull = () => active >= MAX_CONCURRENT;
+let draining = false;
+export const inHouseFull = () => draining || active >= MAX_CONCURRENT;
 
 /** Near the step limit, the agent is told to report, and only has the tools that report. */
 const WRAP_UP_STEPS = 3;
@@ -306,8 +307,29 @@ function taskTools(actor: Actor, repo: RunRepo | null, browser: { runId: string;
   };
 }
 
+/**
+ * Transcripts are read by people, so secrets that tools return or take (a database password in a URL, an API
+ * key or token field) are masked there. The model itself still gets them: it may need them for the task.
+ */
+const SECRET_URL = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:@\/\s"\\]+):([^@\s"\\]+)@/gi;
+const SECRET_NAME = String.raw`(?:(?:[A-Za-z0-9]*[_-])?(?:key|token|secret|password|passwd|credential)s?|[A-Za-z0-9]*(?:Key|Token|Secret|Password|Credential)s?)`;
+const SECRET_FIELD = new RegExp(String.raw`(\\?"${SECRET_NAME}\\?"\s*:\s*\\?")([^"\\]{8,})(\\?")`, 'g');
+const SECRET_KEY = new RegExp(String.raw`^${SECRET_NAME}$`);
+export function redact(text: string) {
+  return text
+    .replace(SECRET_URL, '$1:•••@')
+    .replace(SECRET_FIELD, (_m, pre: string, v: string, post: string) => `${pre}${v.slice(0, 4)}•••${post}`);
+}
+const redactDeep = (v: unknown): unknown =>
+  typeof v === 'string' ? redact(v)
+  : Array.isArray(v) ? v.map(redactDeep)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) =>
+      [k, typeof x === 'string' && SECRET_KEY.test(k) && x.length >= 8 ? `${x.slice(0, 4)}•••` : redactDeep(x)]))
+  : v;
+
 async function logStep(runId: string, kind: string, content: unknown) {
-  await sql`insert into run_steps (run_id, kind, content) values (${runId}, ${kind}, ${sql.json(content as any)})`;
+  const safe = kind === 'tool_call' || kind === 'tool_result' ? redactDeep(content) : content;
+  await sql`insert into run_steps (run_id, kind, content) values (${runId}, ${kind}, ${sql.json(safe as any)})`;
 }
 
 const runFinished = async (runId: string) => {
@@ -501,4 +523,25 @@ export async function recoverInterruptedRuns() {
     await releaseRun({ id: r.id, agentId: r.agentId, itemId: null, keyId: r.keyId }, 'stopped by a restart or crash; queued again');
   }
   if (runs.length) console.log(`recovered ${runs.length} interrupted in-house run(s)`);
+}
+
+/**
+ * Shutting down (a deploy stops this container): start no new runs, give running ones a few seconds, then
+ * release the rest and queue their updates again right away, so the next process picks them up without
+ * waiting for them to look dead. (Docker allows ~10s between SIGTERM and SIGKILL.)
+ */
+export async function drainInHouse(ms: number) {
+  draining = true;
+  const until = Date.now() + ms;
+  while (active > 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 200));
+  if (!mine.size) return;
+  const runs = await sql`select id, agent_id, key_id, notification_ids from agent_runs where id in ${sql([...mine])} and finished_at is null`;
+  for (const r of runs) {
+    if (r.notificationIds.length) {
+      await sql`update notifications set delivery_status = 'pending', next_attempt_at = now() where id in ${sql(r.notificationIds.map(Number))}`;
+    }
+    await sql`insert into run_steps (run_id, kind, content) values (${r.id}, 'error', ${sql.json({ text: 'Tasks restarted (a deploy) during this run; the work was queued again.' })})`;
+    await releaseRun({ id: r.id, agentId: r.agentId, itemId: null, keyId: r.keyId }, 'Tasks restarted during the run; queued again');
+  }
+  console.log(`drained: queued ${runs.length} in-house run(s) again`);
 }

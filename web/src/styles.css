@@ -451,3 +451,7 @@ code.inherited { margin-right: 6px; }
 .value-edit { display: flex; gap: 6px; flex: 1; align-items: center; }
 .value-add { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; margin-top: 12px; }
 @media (max-width: 640px) { .value-add { grid-template-columns: 1fr; } }
+.template-update { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.badge-danger { margin-left: 6px; padding: 0 6px; border-radius: 4px; background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); font-weight: 600; }
+.badge-muted { margin-left: 6px; padding: 0 6px; border-radius: 4px; background: var(--surface-2); color: var(--muted); }
+.warn-text { color: var(--issue); font-weight: 400; }

@@ -13,6 +13,7 @@ import * as llm from './llm.js';
 import * as github from './github.js';
 import * as connectors from './connectors.js';
 import * as values from './projectValues.js';
+import * as alerts from './alerts.js';
 import { watchdogTick } from './watchdog.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
@@ -143,6 +144,16 @@ export function apiRoutes(app: FastifyInstance) {
       return { ok: true };
     });
   }
+
+  // ---- your alerts ----
+  route(app, 'GET', '/api/me/alerts', { section: 'You', summary: 'where you get alerts outside the inbox (Telegram)' }, async (req) =>
+    alerts.getAlerts(await requireActor(req)),
+  );
+  route(app, 'PUT', '/api/me/alerts/telegram', {
+    section: 'You',
+    summary: 'send your alerts to a Telegram chat through your bot (sends a test message first); {"telegram": null} turns it off',
+    body: z.object({ telegram: z.object({ botToken: z.string().min(20).max(200), chatId: z.string().min(1).max(64) }).nullable() }),
+  }, async (req, { body }) => alerts.setTelegram(await requireActor(req), body.telegram));
 
   // ---- project values ----
   route(app, 'GET', '/api/projects/:org/:key/values', { section: 'Projects', summary: 'the project’s shared values (key/value notes like staging_url; any member)' }, async (req) =>

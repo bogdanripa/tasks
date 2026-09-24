@@ -172,6 +172,16 @@ Agents that Tasks runs can use remote MCP servers (Streamable HTTP, or HTTP+SSE)
 
 Code: `server/src/connectors.ts`.
 
+### Autonomy safeguards
+
+- **Watchdog:** every 5 minutes it finds agent work with nothing running, nothing queued and 30 minutes of silence (a run cut off, one that ended without a status, a crash). It nudges the agent twice, then pings the human who created the project. Tune with `WATCHDOG_STALL_SECONDS` / `WATCHDOG_INTERVAL_SECONDS`.
+- **Step limits:** a few steps before its limit an agent is told to report and keeps only the reporting tools; a run still cut off says so on the item. Starter roles default to QA 120, Dev 100, PM/Lead 60 steps.
+- **Questions:** when an agent asks a person (a task it created, assigned to them, blocking its work), the person's reply is the answer: the task closes, the agent is unblocked, and its next run gets the reply.
+- **Alerts:** people can add their own Telegram bot and chat (Settings → Alerts) for what needs them: watchdog escalations and things agents hand them.
+- **Releases:** pull requests between the development and production branches are merged with a merge commit (work branches are squashed), so the branches don't diverge and the next release doesn't conflict.
+- **Deploys:** on SIGTERM Tasks starts no new runs, gives running ones a few seconds, and hands the rest back to the queue. One process runs the queue at a time (a Postgres advisory lock), and runs whose process died are recovered after 10 quiet minutes.
+- **Connectors:** tools a server marks `destructiveHint` are off unless an admin ticks them; empty optional arguments are dropped; secrets (database URLs' passwords, key/token/secret fields) are masked in transcripts.
+
 ### Routine agents (Claude Code cloud routines)
 
 Each agent can have its own routine at claude.ai/code/routines with a **Call via API** trigger. The agent page walks through the setup: the Instructions to paste, the domain the routine's cloud environment must allow (**Network access → Custom**), and where to paste the routine's URL and token. The token is stored encrypted with `SECRETS_KEY`.

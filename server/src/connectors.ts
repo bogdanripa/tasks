@@ -265,7 +265,7 @@ async function connect(c: Row) {
 }
 
 async function listTools(client: Client) {
-  const tools: { name: string; description?: string; inputSchema: any }[] = [];
+  const tools: { name: string; description?: string; inputSchema: any; annotations?: { destructiveHint?: boolean; readOnlyHint?: boolean } }[] = [];
   let cursor: string | undefined;
   for (let i = 0; i < 20; i++) {
     const page = await client.listTools(cursor ? { cursor } : {});
@@ -287,7 +287,13 @@ export async function testConnector(actor: Actor, id: string) {
   }
   try {
     const tools = await listTools(client);
-    return tools.map((t) => ({ name: t.name, description: (t.description ?? '').split('\n')[0].slice(0, 200), allowed: !c.allowedTools || c.allowedTools.includes(t.name) }));
+    return tools.map((t) => ({
+      name: t.name,
+      description: (t.description ?? '').split('\n')[0].slice(0, 200),
+      destructive: t.annotations?.destructiveHint === true,
+      readOnly: t.annotations?.readOnlyHint === true,
+      allowed: allowed(c, t),
+    }));
   } finally {
     await client.close().catch(() => {});
   }
@@ -304,6 +310,19 @@ export async function runConnectors(orgId: string, projectId: string | null, age
         or (c.agent_id is null and (c.project_id is null or c.project_id = ${projectId})
             and exists (select 1 from agent_connectors ac where ac.agent_id = ${agentId} and ac.connector_id = c.id)))
     order by c.name`;
+}
+
+/**
+ * Whether agents get a tool: the connector's explicit list, or (with no list) every tool the server doesn't
+ * mark destructive. Destructive ones (deleting, dropping, a root shell) have to be ticked by an admin.
+ */
+const allowed = (c: Row, t: { name: string; annotations?: { destructiveHint?: boolean } }) =>
+  c.allowedTools ? c.allowedTools.includes(t.name) : t.annotations?.destructiveHint !== true;
+
+/** Strict tool calling makes models fill every field; "" and null in optional ones mean "not given". */
+function dropBlankOptionals(args: Record<string, unknown>, schema: any) {
+  const required = new Set<string>(schema?.required ?? []);
+  return Object.fromEntries(Object.entries(args ?? {}).filter(([k, v]) => required.has(k) || (v !== '' && v !== null)));
 }
 
 const toolName = (connector: string, tool: string) => `${connector}__${tool}`.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
@@ -336,14 +355,14 @@ export async function openConnectors(orgId: string, projectId: string | null, ag
     try {
       const client = await connect(c);
       clients.push(client);
-      const offered = (await listTools(client)).filter((t) => !c.allowedTools || c.allowedTools.includes(t.name));
+      const offered = (await listTools(client)).filter((t) => allowed(c, t));
       for (const t of offered) {
         tools[toolName(c.name, t.name)] = tool({
           description: `[${c.name}] ${t.description ?? t.name}`.slice(0, 1024),
           inputSchema: jsonSchema(t.inputSchema ?? { type: 'object', properties: {} }),
           execute: async (args: any) => {
             try {
-              const res = await client.callTool({ name: t.name, arguments: args ?? {} }, undefined, { timeout: CALL_TIMEOUT_MS });
+              const res = await client.callTool({ name: t.name, arguments: dropBlankOptionals(args, t.inputSchema) }, undefined, { timeout: CALL_TIMEOUT_MS });
               return resultText(res);
             } catch (e) {
               return `Error: ${(e as Error).message}`;

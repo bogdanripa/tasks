@@ -15,7 +15,7 @@ type Connector = {
   projectKey: string | null;
   enabled?: boolean;
 };
-type Tool = { name: string; description: string; allowed: boolean };
+type Tool = { name: string; description: string; allowed: boolean; destructive: boolean; readOnly: boolean };
 
 /**
  * MCP connectors at one level: the org (every agent), a project (agents working on its items) or one agent.
@@ -89,7 +89,7 @@ function UseConnectors({ agentBase, available, onChange }: { agentBase: string; 
               <b>{c.name}</b>
               <span className="muted small">
                 {c.scope === 'project' ? `project ${c.projectKey}, only on its items` : 'organization'} ·{' '}
-                {c.allowedTools ? `${c.allowedTools.length} tools` : 'all tools'}
+                {c.allowedTools ? `${c.allowedTools.length} tools` : 'safe tools'}
               </span>
             </label>
           ))}
@@ -128,7 +128,7 @@ function ConnectorRow({ c, onChange }: { c: Connector; onChange: () => void }) {
         <b>{c.name}</b>
         <span className="muted small grow connector-url">{c.url}</span>
         <span className={`small ${c.auth === 'oauth' && !c.oauthConnected ? 'error-text' : 'muted'}`}>{status}</span>
-        <span className="small muted">{c.allowedTools ? `${c.allowedTools.length} tools allowed` : 'all tools'}</span>
+        <span className="small muted">{c.allowedTools ? `${c.allowedTools.length} tools allowed` : 'safe tools'}</span>
         {c.auth === 'oauth' && <a className="button small" href={`/api/connectors/${c.id}/oauth`}>{c.oauthConnected ? 'Reconnect' : 'Connect'}</a>}
         {c.auth === 'header' && <button className="ghost small" onClick={() => setHeader(header === null ? '' : null)}>Change key</button>}
         <button className="ghost small" onClick={() => (tools ? setTools(null) : loadTools())} disabled={busy}>
@@ -166,6 +166,7 @@ function ConnectorRow({ c, onChange }: { c: Connector; onChange: () => void }) {
             <span className="small">
               Connected. {tools.length} tools; agents may use {picked.size}.
             </span>
+            <button className="link small" onClick={() => setPicked(new Set(tools.filter((t) => !t.destructive).map((t) => t.name)))}>Default</button>
             <button className="link small" onClick={() => setPicked(new Set(tools.map((t) => t.name)))}>All</button>
             <button className="link small" onClick={() => setPicked(new Set())}>None</button>
           </div>
@@ -183,7 +184,10 @@ function ConnectorRow({ c, onChange }: { c: Connector; onChange: () => void }) {
                   }}
                 />
                 <span>
-                  <code>{t.name}</code> <span className="muted small">{t.description}</span>
+                  <code>{t.name}</code>
+                  {t.destructive && <span className="badge-danger small">destructive</span>}
+                  {t.readOnly && <span className="badge-muted small">read-only</span>}{' '}
+                  <span className="muted small">{t.description}</span>
                 </span>
               </label>
             ))}
@@ -192,14 +196,16 @@ function ConnectorRow({ c, onChange }: { c: Connector; onChange: () => void }) {
             <button
               className="primary small"
               onClick={async () => {
-                const all = picked.size === tools.length;
-                await api('PATCH', `/api/connectors/${c.id}`, { allowedTools: all ? null : [...picked] });
+                // Exactly the non-destructive tools = the default (null), which also lets new safe tools in later.
+                const safe = tools.filter((t) => !t.destructive).map((t) => t.name);
+                const isDefault = picked.size === safe.length && safe.every((n) => picked.has(n));
+                await api('PATCH', `/api/connectors/${c.id}`, { allowedTools: isDefault ? null : [...picked] });
                 onChange();
               }}
             >
               Save allowed tools
             </button>
-            <span className="muted small"> All selected means new tools the server adds later are allowed too.</span>
+            <span className="muted small"> By default agents get every tool the server doesn’t mark destructive, including ones it adds later. Tick destructive tools only when an agent needs them.</span>
           </div>
         </div>
       )}
@@ -236,6 +242,9 @@ function AddConnector({ base, onDone, onCancel }: { base: string; onDone: () => 
         <label>
           MCP server URL <span className="muted small">(Streamable HTTP or SSE)</span>
           <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/mcp" required />
+          {/[?&](key|token|api_key|apikey|access_token)=/i.test(url) && (
+            <span className="small warn-text">This URL carries a key. If the server accepts it as a header, use “API key in a header” instead: it’s stored encrypted.</span>
+          )}
         </label>
       </div>
       <label>

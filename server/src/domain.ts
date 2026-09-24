@@ -4,6 +4,7 @@ import type { Actor } from './auth.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { encrypt } from './crypto.js';
 import { config } from './config.js';
+import { isAlert } from './alerts.js';
 import { agentReady, PIPELINE_TEMPLATE, seedStarterAgents, STARTER_AGENTS } from './starter.js';
 import { canUseTools } from './llm.js';
 
@@ -136,11 +137,15 @@ async function notify(tx: Db, accountId: string | null | undefined, eventId: num
   if (!accountId) return;
   if (accountId === actor.id && !(actor.kind === 'agent' && SELF_NOTIFY.has(reason))) return;
   const quiet = `${config.agentQuietSeconds} seconds`;
+  // Agents get their updates delivered; people who set up alerts get the ones that need them.
+  const alert = isAlert(reason, actor);
   const [row] = await tx`
     insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
     select a.id, ${eventId}, ${itemId}, ${reason},
-           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null then 'pending' end,
-           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null then now() + ${quiet}::interval end
+           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null
+                  or (${alert} and a.kind = 'human' and a.telegram_chat_id is not null) then 'pending' end,
+           case when a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null
+                  or (${alert} and a.kind = 'human' and a.telegram_chat_id is not null) then now() + ${quiet}::interval end
     from accounts a
     where a.id = ${accountId}
       and not exists (select 1 from notifications n where n.account_id = a.id and n.event_id = ${eventId} and n.item_id is not distinct from ${itemId})
@@ -459,19 +464,31 @@ export async function createAgent(actor: Actor, slug: string, input: { name: str
  */
 export async function addStarterTeam(actor: Actor, slug: string, runtime?: { providerId: string; model: string } | null) {
   const org = await resolveOrg(actor, slug, true);
-  const taken = new Set(
-    (await sql`select lower(a.name) as n from accounts a join memberships m on m.account_id = a.id and m.org_id = ${org.id} where a.deactivated_at is null`).map((r) => r.n),
+  const existing = new Map(
+    (await sql`
+      select lower(a.name) as n, a.id, a.kind,
+             (a.routine_url is not null or a.webhook_url is not null or a.runtime_provider_id is not null) as connected
+      from accounts a join memberships m on m.account_id = a.id and m.org_id = ${org.id} where a.deactivated_at is null`).map((r) => [r.n, r]),
   );
   const created: { id: string; name: string }[] = [];
+  const connected: string[] = [];
   for (const a of STARTER_AGENTS) {
-    if (taken.has(a.name.toLowerCase())) continue;
+    const had = existing.get(a.name.toLowerCase());
+    if (had) {
+      // Already there: connect it if it isn't yet (so one form runs the whole team).
+      if (runtime && had.kind === 'agent' && !had.connected) {
+        await updateAgent(actor, had.id, { runtime: { ...runtime, maxSteps: a.maxSteps } });
+        connected.push(a.name);
+      }
+      continue;
+    }
     const agent = await createAgent(actor, slug, { name: a.name });
-    await sql`update accounts set description = ${a.description} where id = ${agent.id}`;
+    await sql`update accounts set description = ${a.description}, runtime_max_steps = ${a.maxSteps} where id = ${agent.id}`;
     await sql`update memberships set skills = ${a.skills} where org_id = ${org.id} and account_id = ${agent.id}`;
-    if (runtime) await updateAgent(actor, agent.id, { runtime: { ...runtime, maxSteps: a.skills.includes('backend') ? 80 : 40 } });
+    if (runtime) await updateAgent(actor, agent.id, { runtime: { ...runtime, maxSteps: a.maxSteps } });
     created.push({ id: agent.id, name: a.name });
   }
-  return { created, agentReady: await agentReady(sql, org.id) };
+  return { created, connected, agentReady: await agentReady(sql, org.id) };
 }
 
 /** Agents are managed by admins of their home org. */
@@ -997,7 +1014,27 @@ export async function addComment(actor: Actor, ref: string, body: string) {
       }
     }
     return c;
+  }).then(async (c) => {
+    await answerQuestion(actor, item);
+    return c;
   });
+}
+
+/**
+ * An agent asked a person something: a task it created, assigned to that person, blocking the agent's own
+ * work. The person's reply is the answer, so the task is done: that unblocks the agent, whose next run gets
+ * the reply. (To ask back instead, reopen it or answer on the agent's item.)
+ */
+async function answerQuestion(actor: Actor, item: Row) {
+  if (actor.kind !== 'human' || item.type !== 'task' || item.done || item.assigneeId !== actor.id) return;
+  const [asked] = await sql`
+    select 1 from accounts creator
+    join links l on l.from_id = ${item.id} and l.kind = 'blocks' and l.removed_at is null
+    join items b on b.id = l.to_id and b.closed_at is null and b.assignee_id = creator.id
+    where creator.id = ${item.createdBy} and creator.kind = 'agent' limit 1`;
+  if (!asked) return;
+  const [p] = await sql`select columns from projects where id = ${item.projectId}`;
+  await updateItem(actor, item.id, { status: p.columns[p.columns.length - 1] });
 }
 
 // Description edits store the full before/after text; history and timelines only need to know it changed.

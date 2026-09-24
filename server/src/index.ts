@@ -14,7 +14,7 @@ import { mcpRoutes } from './mcp.js';
 import { startDeliveryWorker } from './delivery.js';
 import { collectRoutes } from './apidoc.js';
 import { startScheduler } from './schedules.js';
-import { recoverInterruptedRuns } from './runtime.js';
+import { drainInHouse, recoverInterruptedRuns } from './runtime.js';
 
 const app = Fastify({ logger: { level: config.production ? 'info' : 'warn' }, trustProxy: true });
 await app.register(cookie);
@@ -70,3 +70,19 @@ startWatchdog();
 // '::' is dual-stack in Node: a container healthcheck may use ::1 while a proxy uses IPv4.
 await app.listen({ port: config.port, host: process.env.HOST || '::' });
 console.log(`tasks listening on :${config.port}`);
+
+// A deploy sends SIGTERM and kills ~10s later: stop taking work, let runs finish or hand them back, then exit.
+let stopping = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, async () => {
+    if (stopping) return;
+    stopping = true;
+    try {
+      await drainInHouse(7_000);
+      await app.close();
+    } catch (e) {
+      console.error('shutdown', e);
+    }
+    process.exit(0);
+  });
+}

@@ -6,6 +6,7 @@ import type { Actor } from './auth.js';
 import { inbox } from './domain.js';
 import { processRoutineQueue, sweepStaleRuns, type Pending } from './routine.js';
 import { recoverInterruptedRuns } from './runtime.js';
+import { sendAlert } from './alerts.js';
 
 const QUEUE_LOCK = 72_451_001; // pg advisory lock id for the delivery queue
 
@@ -22,6 +23,7 @@ async function deliverDue() {
     select n.id, n.reason, n.attempts, n.created_at, n.item_id, a.id as agent_id, a.name as agent_name, a.org_id as agent_org_id,
            a.webhook_url, a.webhook_secret, a.routine_url, a.routine_token_enc, v.assignee_id as item_assignee_id,
            a.runtime_provider_id, a.runtime_model, a.runtime_max_steps,
+           a.kind as account_kind, a.telegram_bot_token_enc, a.telegram_chat_id,
            lower(v.status) = 'backlog' as item_in_backlog,
            v.closed_at is not null as item_closed,
            exists (select 1 from links l join items b on b.id = l.from_id
@@ -36,12 +38,21 @@ async function deliverDue() {
     where n.delivery_status = 'pending' and n.next_attempt_at <= now()
     order by n.id limit ${BATCH}`;
 
+  // People's alerts go to their Telegram.
+  const alerts = due.filter((n) => n.accountKind === 'human');
+  await Promise.all(
+    alerts.map(async (n) => {
+      const error = n.telegramChatId && n.telegramBotTokenEnc ? await sendAlert(n as any) : 'alerts not set up';
+      await sql`update notifications set delivery_status = ${error ? 'failed' : 'delivered'}, attempts = attempts + 1, last_error = ${error} where id = ${n.id}`;
+    }),
+  );
+
   // Routine agents go through their queue; webhook agents get one POST per notification.
-  const routine = due.filter((n) => (n.routineUrl && n.routineTokenEnc) || (n.runtimeProviderId && n.runtimeModel));
+  const routine = due.filter((n) => n.accountKind !== 'human' && ((n.routineUrl && n.routineTokenEnc) || (n.runtimeProviderId && n.runtimeModel)));
   if (routine.length) await processRoutineQueue(routine as unknown as Pending[]);
 
   await Promise.all(
-    due.filter((n) => !routine.includes(n)).map(async (n) => {
+    due.filter((n) => !routine.includes(n) && !alerts.includes(n)).map(async (n) => {
       if (!n.webhookUrl) {
         await sql`update notifications set delivery_status = null where id = ${n.id}`;
         return;

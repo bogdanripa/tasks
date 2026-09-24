@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
@@ -65,18 +65,7 @@ export default function ProjectSettings() {
           editPlaceholder={'e.g.\n- Deploy from main only.\n- Move work to Review, not Done; a human closes it.\n- Link any follow-up as an issue triggered by the task.'}
           onSave={(guidelines) => update({ guidelines })}
         />
-        <div className="actions" style={{ marginTop: 8 }}>
-          <button
-            className="ghost small grow-left"
-            onClick={async () => {
-              if (project.guidelines && !confirm('Replace the current guidelines with the agent pipeline template?')) return;
-              const res = await fetch('/api/templates/agent-pipeline');
-              await update({ guidelines: await res.text() });
-            }}
-          >
-            Use the agent pipeline template
-          </button>
-        </div>
+        <TemplateUpdate current={project.guidelines} onApply={(guidelines) => update({ guidelines })} />
       </section>
       )}
 
@@ -238,6 +227,33 @@ function ColumnsEditor(props: {
           {saved ? 'Saved' : 'Save columns'}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The agent pipeline template improves over time, but a project keeps the copy it started with. Say when
+ * there's a newer one (for projects that use it) and offer to apply it.
+ */
+function TemplateUpdate({ current, onApply }: { current: string; onApply: (text: string) => Promise<void> }) {
+  const [template, setTemplate] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/api/templates/agent-pipeline').then((r) => r.text()).then(setTemplate).catch(() => {});
+  }, []);
+  if (template === null || template.trim() === (current ?? '').trim()) return null;
+  const usesIt = /^## How work flows here/m.test(current ?? '');
+  return (
+    <div className={usesIt ? 'warn template-update' : 'actions'} style={{ marginTop: 8 }}>
+      {usesIt && <span className="small">The agent pipeline template has been updated since these guidelines were written.</span>}
+      <button
+        className={usesIt ? 'small' : 'ghost small grow-left'}
+        onClick={async () => {
+          if (current && !confirm('Replace the current guidelines with the latest agent pipeline template? Your own edits to them will be lost.')) return;
+          await onApply(template);
+        }}
+      >
+        {usesIt ? 'Update to the latest template' : 'Use the agent pipeline template'}
+      </button>
     </div>
   );
 }

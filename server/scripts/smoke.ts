@@ -572,6 +572,7 @@ assert.match((await runFor(refused.ref)).error, /model call failed.*Incorrect AP
 const repoFiles: Record<string, Record<string, string>> = { main: { 'README.md': '# pong' } };
 const repos: Record<string, Record<string, Record<string, string>>> = { pong: repoFiles, fresh: {} }; // fresh: a brand-new empty repo
 const ghCalls: string[] = [];
+const mergeMethods: string[] = [];
 let tokenRequests: any[] = [];
 const ghServer = http.createServer((req, res) => {
   let body = '';
@@ -618,7 +619,9 @@ const ghServer = http.createServer((req, res) => {
       return send(200, { commit: { sha: 'c1' } });
     }
     if (rest === '/pulls' && req.method === 'POST') { (files as any).__pr = b.head; return send(201, { number: 1, html_url: 'https://github.com/octo/pong/pull/1' }); }
-    if (rest === '/pulls/1/merge') { Object.assign(files.main, files[(files as any).__pr]); return send(200, { merged: true }); }
+    if (rest === '/pulls/1' && req.method === 'GET') return send(200, { number: 1, head: { ref: (files as any).__pr }, base: { ref: 'main' } });
+    if (rest === '/pulls/1/merge') {
+      mergeMethods.push(b.merge_method); Object.assign(files.main, files[(files as any).__pr]); return send(200, { merged: true }); }
     if (rest === '/pages' && req.method === 'POST') return send(201, {});
     if (rest === '/pages') return send(200, { html_url: 'https://octo.github.io/pong/', status: 'built' });
     return send(404, { message: 'Not Found' });
@@ -666,6 +669,7 @@ const pongGhNow = await api('GET', `/api/items/${pongGh.ref}`);
 assert.equal(pongGhNow.item.status, 'Done');
 assert.match(pongGhNow.comments.at(-1).body, /octo\.github\.io\/pong/);
 assert.match(repoFiles.main['index.html'], /pong/, 'merged into main');
+assert.deepEqual(mergeMethods, ['squash'], 'a work branch is squashed');
 assert.deepEqual(tokenRequests[0]?.repositories, ['pong'], 'run token limited to the project repo');
 assert.equal(tokenRequests[0]?.permissions?.workflows, 'write', 'workflows can be written when the installation grants it');
 const devPrompt = (await api('GET', `/api/runs/${devRun.id}`)).steps.find((s: any) => s.kind === 'prompt').content.text;
@@ -762,7 +766,7 @@ const mcpHttp = http.createServer(async (req, res) => {
   const server = new McpServer({ name: 'ops', version: '1.0.0' });
   server.registerTool('add', { description: 'Add two numbers', inputSchema: { a: z.number(), b: z.number() } }, async ({ a, b }: any) => ({ content: [{ type: 'text', text: String(a + b) }] }));
   server.registerTool('echo', { description: 'Echo text', inputSchema: { text: z.string() } }, async ({ text }: any) => ({ content: [{ type: 'text', text }] }));
-  server.registerTool('danger', { description: 'Delete everything', inputSchema: {} }, async () => ({ content: [{ type: 'text', text: 'deleted' }] }));
+  server.registerTool('danger', { description: 'Delete everything', inputSchema: {}, annotations: { destructiveHint: true } }, async () => ({ content: [{ type: 'text', text: 'deleted' }] }));
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => { transport.close(); server.close(); });
   await server.connect(transport);
@@ -773,7 +777,10 @@ await assert.rejects(api('POST', `/api/orgs/${org}/connectors`, { name: 'Bad Nam
 const opsConn = await api('POST', `/api/orgs/${org}/connectors`, { name: 'ops', url: 'http://localhost:4563/secure', auth: 'header', headerValue: 'Bearer wrong' });
 await assert.rejects(api('POST', `/api/connectors/${opsConn.id}/test`), /Couldn’t connect/);
 await api('PATCH', `/api/connectors/${opsConn.id}`, { headerValue: 'Bearer ops-key' });
-assert.deepEqual((await api('POST', `/api/connectors/${opsConn.id}/test`)).map((t: any) => t.name).sort(), ['add', 'danger', 'echo']);
+const opsTools = await api('POST', `/api/connectors/${opsConn.id}/test`);
+assert.deepEqual(opsTools.map((t: any) => t.name).sort(), ['add', 'danger', 'echo']);
+assert.deepEqual(opsTools.filter((t: any) => t.allowed).map((t: any) => t.name).sort(), ['add', 'echo'], 'destructive tools are off unless ticked');
+assert.equal(opsTools.find((t: any) => t.name === 'danger').destructive, true);
 await api('PATCH', `/api/connectors/${opsConn.id}`, { allowedTools: ['add', 'echo'] });
 assert.deepEqual((await api('POST', `/api/connectors/${opsConn.id}/test`)).filter((t: any) => t.allowed).map((t: any) => t.name).sort(), ['add', 'echo']);
 await assert.rejects(api('POST', `/api/orgs/${org}/connectors`, { name: 'ops', url: 'http://localhost:4563/open', auth: 'none' }), /already exists/);
@@ -842,6 +849,26 @@ assert.equal(looseNow.item.assigneeKind, 'human');
 assert.ok(looseNow.history.some((e: any) => e.data?.byReply));
 console.log('✓ replying on an unassigned item assigns it to the person');
 
+// ---- Alerts: a person's Telegram gets what needs them ----
+const telegramMessages: { token: string; chat: string; text: string }[] = [];
+const tg = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    const m = /^\/bot([^/]+)\/sendMessage$/.exec(req.url ?? '');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    if (!m || m[1] === 'bad-token-xxxxxxxxxxxxxxx') return res.end(JSON.stringify({ ok: false, description: 'Unauthorized' }));
+    const b = JSON.parse(body);
+    telegramMessages.push({ token: m[1], chat: String(b.chat_id), text: b.text });
+    res.end(JSON.stringify({ ok: true }));
+  });
+});
+await new Promise<void>((r) => tg.listen(4564, r));
+await assert.rejects(api('PUT', '/api/me/alerts/telegram', { telegram: { botToken: 'bad-token-xxxxxxxxxxxxxxx', chatId: '42' } }), /Unauthorized/);
+await api('PUT', '/api/me/alerts/telegram', { telegram: { botToken: 'good-token-xxxxxxxxxxxxxxx', chatId: '42' } });
+assert.match(telegramMessages[0].text, /Tasks will send you alerts here/, 'a test message first');
+assert.deepEqual((await api('GET', '/api/me/alerts')).telegram, { chatId: '42' });
+
 // ---- Watchdog: a stalled item gets two nudges, then the project's creator is pinged, once ----
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
 const stalledItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Stalls forever', status: 'Todo', assignee: house.agent.id });
@@ -863,6 +890,26 @@ assert.equal(stuckHistory.filter((t: string) => t === 'watchdog.escalated').leng
 const wdInbox = await api('GET', '/api/inbox');
 assert.ok(JSON.stringify(wdInbox).includes('watchdog.escalated'), 'the project creator is pinged in their inbox');
 console.log('✓ watchdog: stalled item nudged twice, then the project creator pinged once');
+
+// ---- An agent's question to a person: their reply answers it, which unblocks the agent ----
+const meNow = await api('GET', '/api/me');
+const askerItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Waits on a person', status: 'Backlog', assignee: house.agent.id });
+const question = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: askerItem.ref, title: 'May I drop the database?', assignee: meNow.id }, house.key.key);
+await api('POST', '/api/links', { from: question.ref, to: askerItem.ref, kind: 'blocks' }, house.key.key);
+await api('POST', `/api/comments/${question.ref}`, { body: 'Yes, drop it.' });
+assert.equal((await api('GET', `/api/items/${question.ref}`)).item.done, true, 'the reply answers the question');
+assert.equal((await api('GET', `/api/items/${askerItem.ref}`)).item.blockedBy?.length ?? 0, 0, 'and unblocks the agent');
+// A person's own task isn't closed by their comment.
+const ownTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: askerItem.ref, title: 'Mine', assignee: meNow.id });
+await api('POST', `/api/comments/${ownTask.ref}`, { body: 'note to self' });
+assert.equal((await api('GET', `/api/items/${ownTask.ref}`)).item.done, false);
+console.log('✓ a person replying to an agent’s question answers it and unblocks the agent');
+for (let i = 0; i < 60 && !telegramMessages.some((m) => /handed you/.test(m.text)); i++) await new Promise((r) => setTimeout(r, 100));
+assert.ok(telegramMessages.some((m) => /Needs you: .*Stalls forever/.test(m.text)), 'the watchdog escalation reaches Telegram');
+assert.ok(telegramMessages.some((m) => /handed you .*May I drop the database/.test(m.text)), 'an agent’s question reaches Telegram');
+await api('PUT', '/api/me/alerts/telegram', { telegram: null });
+tg.close();
+console.log('✓ alerts: Telegram test message, watchdog escalations and agents’ questions');
 
 // Switching to a routine turns the in-house runtime off.
 await api('PATCH', `/api/agents/${house.agent.id}`, { routineUrl: `http://localhost:4556/v1/claude_code/routines/trig_${run}/fire`, routineToken: 'sk-ant-oat01-test-token' });
@@ -1098,7 +1145,7 @@ const lateProv = await api('POST', `/api/orgs/${lateOrg}/ai-providers`, { provid
 const team = await api('POST', `/api/orgs/${lateOrg}/starter-team`, { runtime: lateProv ? { providerId: lateProv.id, model: 'fake-idle' } : null });
 assert.deepEqual(team.created.map((a: any) => a.name), ['PM', 'Lead', 'Dev']);
 const devAgent = await api('GET', `/api/agents/${team.created[2].id}`);
-if (lateProv) assert.deepEqual([devAgent.runtime?.model, devAgent.runtime?.maxSteps], ['fake-idle', 80]);
+if (lateProv) assert.deepEqual([devAgent.runtime?.model, devAgent.runtime?.maxSteps], ['fake-idle', 100]);
 assert.equal((await api('POST', `/api/orgs/${lateOrg}/starter-team`, {})).created.length, 0);
 console.log('✓ starter team for an existing org: skips taken names, runs in Tasks with one model');
 

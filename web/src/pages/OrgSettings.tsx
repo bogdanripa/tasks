@@ -130,7 +130,9 @@ export default function OrgSettings() {
           <h2>Agents</h2>
           <button className="small" onClick={() => setModal('agent')}>New agent</button>
         </div>
-        {!data.agentReady && <StarterTeam org={org!} onDone={reload} />}
+        {(!data.agentReady || agents.some((m: any) => STARTER.includes(m.name) && !m.connected)) && (
+          <StarterTeam org={org!} onDone={reload} missing={STARTER.filter((n) => !agents.some((m: any) => m.name === n))} />
+        )}
         {agents.length === 0 && <p className="muted">No agents yet. Each agent gets its own identity and works through a Claude routine, a webhook or the MCP.</p>}
         <ul className="people">
           {agents.map((m: any) => (
@@ -269,7 +271,9 @@ export function NameField({ label, value, onSave, allowEmpty }: { label: string;
 }
 
 /** For an org without the product → build → QA team: add PM, Lead, Dev and QA, optionally run by Tasks. */
-function StarterTeam({ org, onDone }: { org: string; onDone: () => void }) {
+const STARTER = ['PM', 'Lead', 'Dev', 'QA'];
+
+function StarterTeam({ org, onDone, missing }: { org: string; onDone: () => void; missing: string[] }) {
   const providers = useFetch<any[]>(`/api/orgs/${org}/ai-providers`).data ?? [];
   const [providerId, setProviderId] = useState('');
   const [model, setModel] = useState('');
@@ -294,17 +298,20 @@ function StarterTeam({ org, onDone }: { org: string; onDone: () => void }) {
       }}
     >
       <div>
-        <b>Add the starter team</b>
+        <b>{missing.length ? 'Add the starter team' : 'Run the starter team in Tasks'}</b>
         <p className="muted small">
-          PM (product), Lead (architecture, review), Dev (frontend, backend, db) and QA (qa), with their roles. New projects then come set up
-          for them: Todo goes to the PM, Review to the Lead, and the guidelines describe the flow.
+          {missing.length
+            ? <>PM (product), Lead (architecture, review), Dev (frontend, backend, db) and QA (qa), with their roles. New projects then come set up for them: Todo goes to the PM, Review to the Lead, and the guidelines describe the flow. </>
+            : <>Connect PM, Lead, Dev and QA in one go. </>}
+          Step limits are set per role (QA 120, Dev 100, PM and Lead 60).
         </p>
       </div>
       <div className="branch-fields">
         <label>
           Run them in Tasks with
           <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-            <option value="">Don’t run them yet (connect each later)</option>
+            {missing.length > 0 && <option value="">Don’t run them yet (connect each later)</option>}
+            {!missing.length && <option value="">Choose a provider…</option>}
             {providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
         </label>
@@ -317,7 +324,11 @@ function StarterTeam({ org, onDone }: { org: string; onDone: () => void }) {
         )}
       </div>
       <ErrorNote error={error} />
-      <div><button className="primary" disabled={busy}>{busy ? 'Adding…' : 'Add PM, Lead, Dev and QA'}</button></div>
+      <div>
+        <button className="primary" disabled={busy || (!missing.length && !providerId)}>
+          {busy ? 'Working…' : missing.length ? `Add ${missing.join(', ')}` : 'Connect the team'}
+        </button>
+      </div>
     </form>
   );
 }
