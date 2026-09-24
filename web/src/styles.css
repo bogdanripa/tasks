@@ -405,3 +405,6 @@ pre.code { background: var(--surface-2); padding: 10px; border-radius: 6px; over
 .branch-fields label span { display: block; margin-top: 4px; font-weight: 400; }
 @media (max-width: 640px) { .branch-fields { grid-template-columns: 1fr; } }
 .starter-team { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px; background: var(--surface); }
+.agent-row .agent-skills { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.agent-row .agent-end { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
+.agent-row .not-connected { margin-left: 0; }

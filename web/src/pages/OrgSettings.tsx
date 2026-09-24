@@ -133,16 +133,18 @@ export default function OrgSettings() {
         {agents.length === 0 && <p className="muted">No agents yet. Each agent gets its own identity and works through a Claude routine, a webhook or the MCP.</p>}
         <ul className="people">
           {agents.map((m: any) => (
-            <li key={m.id}>
+            <li key={m.id} className="agent-row">
               <Avatar name={m.name} kind="agent" />
               <Link to={`/agents/${m.id}`}>{m.name}</Link>
-              {m.connected ? (
-                <span className="muted small">{m.delivery === 'builtin' ? 'runs in Tasks' : m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'MCP'}</span>
-              ) : (
-                <NotConnected agent={m} admin />
-              )}
-              <span className="skills">
+              <span className="agent-skills">
                 {m.skills.length ? m.skills.map((sk: string) => <SkillChip key={sk} skill={sk} />) : <span className="muted small">no skills</span>}
+              </span>
+              <span className="agent-end">
+                {m.connected ? (
+                  <span className="muted small">{m.delivery === 'builtin' ? 'runs in Tasks' : m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'MCP'}</span>
+                ) : (
+                  <NotConnected agent={m} admin />
+                )}
                 <Link to={`/agents/${m.id}`} className="small">edit</Link>
               </span>
             </li>
