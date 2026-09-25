@@ -156,7 +156,8 @@ async function notify(tx: Db, accountId: string | null | undefined, eventId: num
   const alert = isAlert(reason, actor);
   // An agent's comments are notes on its work (it may add several while figuring things out): they reach
   // people's inboxes but never start another agent's run. Hand-offs go through tasks and statuses.
-  const wakes = !(reason === 'commented' && actor.kind === 'agent');
+  // Tasks added under an issue are news for its owner, not work: it's woken when they're all done.
+  const wakes = !(reason === 'commented' && actor.kind === 'agent') && reason !== 'task_added';
   const [row] = await tx`
     insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
     select a.id, ${eventId}, ${itemId}, ${reason},

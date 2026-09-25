@@ -942,6 +942,10 @@ await api('POST', `/api/comments/${noted.ref}`, { body: 'FYI: found the cause' }
 const rDeliveries = (await api('GET', `/api/agents/${rAgent.agent.id}`)).deliveries.filter((d: any) => d.itemRef === noted.ref);
 const note = rDeliveries.find((d: any) => d.reason === 'commented');
 assert.ok(note && note.deliveryStatus === null, 'an agent’s comment doesn’t start another agent’s run');
+// Tasks added under an agent's issue don't wake it either: it's woken when they're all done.
+await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: noted.ref, title: 'Part one', status: 'Backlog' }, house.key.key);
+const added = (await api('GET', `/api/agents/${rAgent.agent.id}`)).deliveries.find((d: any) => d.itemRef === noted.ref && d.reason === 'task_added');
+assert.ok(added && added.deliveryStatus === null, 'a task added under an issue doesn’t start its owner’s run');
 console.log('✓ agents’ comments reach inboxes without starting runs');
 // A run cut off by a restart: the next run on the item is told what it already did.
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-worker' } });
