@@ -867,8 +867,11 @@ assert.match(valPrompt, /- staging_url = https:\/\/pong-staging\.example\.com/);
 assert.equal((await api('GET', `/api/projects/${org}/WEB/values`)).find((v: any) => v.key === 'production_url')?.value, 'https://pong.example.com', 'agents save values with a tool');
 console.log('✓ project values: anyone sets and deletes, timeline, every run sees them, agents save them');
 
-// A person replying on an unassigned item takes it; an assigned one keeps its assignee.
-const loose = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Nobody owns this', status: 'Backlog' });
+// A person replying on an unassigned item someone else filed takes it; notes on your own issue don't.
+const mine = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'My own note', status: 'Backlog' });
+await api('POST', `/api/comments/${mine.ref}`, { body: 'More details' });
+assert.equal((await api('GET', `/api/items/${mine.ref}`)).item.assigneeId, null, 'commenting on your own issue does not take it');
+const loose = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Nobody owns this', status: 'Backlog' }, house.key.key);
 await api('POST', `/api/comments/${loose.ref}`, { body: 'I will look at it' });
 const looseNow = await api('GET', `/api/items/${loose.ref}`);
 assert.equal(looseNow.item.assigneeKind, 'human');

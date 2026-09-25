@@ -1056,8 +1056,9 @@ export async function addComment(actor: Actor, ref: string, body: string) {
     });
     await notify(tx, item.assigneeId, ev, item.id, 'commented', actor);
     await notify(tx, item.createdBy, ev, item.id, 'commented', actor);
-    // A person who replies on an unassigned item takes it (agents don't: they comment on items they don't own).
-    if (!item.assigneeId && actor.kind === 'human') {
+    // A person who replies on an unassigned item someone else filed takes it (agents don't: they comment on
+    // items they don't own). Notes on your own new issue leave it to be routed.
+    if (!item.assigneeId && actor.kind === 'human' && item.createdBy !== actor.id) {
       const [took] = await tx`update items set assignee_id = ${actor.id} where id = ${item.id} and assignee_id is null returning id`;
       if (took) {
         await emit(tx, {
