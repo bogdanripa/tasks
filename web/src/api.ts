@@ -60,6 +60,8 @@ export type Item = {
   assigneeKind: 'human' | 'agent' | null;
   parentRef: string | null;
   done: boolean;
+  /** When it was done (the board's done column shows recent ones first). */
+  closedAt?: string | null;
   tasksTotal?: number;
   tasksDone?: number;
   linkCount?: number;

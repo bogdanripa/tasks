@@ -764,7 +764,7 @@ export async function listItems(project: Row, f: { status?: string; type?: ItemT
            -- An update waiting for the assigned agent: when its run is due (quiet period, or the agent is busy).
            (select min(n.next_attempt_at) from notifications n
             where n.item_id = v.id and n.account_id = v.assignee_id and n.delivery_status = 'pending') as starts_at,
-           v.parent_id, par.ref as parent_ref, v.done, v.created_at, v.updated_at,
+           v.parent_id, par.ref as parent_ref, v.done, v.closed_at, v.created_at, v.updated_at,
            (select count(*)::int from items c where c.parent_id = v.id) as tasks_total,
            (select count(*)::int from items c where c.parent_id = v.id and c.closed_at is not null) as tasks_done,
            (select count(*)::int from links l where (l.from_id = v.id or l.to_id = v.id) and l.removed_at is null) as link_count

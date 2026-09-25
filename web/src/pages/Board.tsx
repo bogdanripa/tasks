@@ -8,6 +8,10 @@ import { ItemTable } from './ItemTable';
 
 type Filter = 'all' | 'issue' | 'task';
 
+/** The done column shows the latest few, newest first, and more on request, so it doesn't grow forever. */
+const DONE_PAGE = 7;
+const doneAt = (i: Item) => (i.closedAt ? new Date(i.closedAt).getTime() : Date.now()); // just dropped there: now
+
 export default function Board() {
   const { org, key } = useParams();
   const { data, error, reload, setData } = useFetch<{ project: any; items: Item[] }>(`/api/projects/${org}/${key}`);
@@ -15,6 +19,7 @@ export default function Board() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<{ status: string; index: number } | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
+  const [doneShown, setDoneShown] = useState(DONE_PAGE);
   const { me } = useSession();
   const admin = me.orgs.find((o) => o.slug === org)?.role !== 'member';
   const [view, setView] = useParamState<'board' | 'list'>('view', `view:${org}/${key}`, 'board');
@@ -39,6 +44,8 @@ export default function Board() {
     const by: Record<string, Item[]> = {};
     for (const c of data?.project.columns ?? []) by[c] = [];
     for (const i of data?.items ?? []) if (shown(i)) (by[i.status] ??= []).push(i);
+    const last = data?.project.columns.at(-1);
+    if (last && by[last]) by[last].sort((a, b) => doneAt(b) - doneAt(a));
     return by;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, filter, assignee, me.id]);
@@ -110,8 +117,10 @@ export default function Board() {
       ) : (
       <div className="board">
         {project.columns.map((status: string, ci: number) => {
-          const cards = columns[status] ?? [];
           const last = ci === project.columns.length - 1;
+          const everything = columns[status] ?? [];
+          const cards = last ? everything.slice(0, doneShown) : everything;
+          const more = everything.length - cards.length;
           return (
             <section
               key={status}
@@ -135,7 +144,7 @@ export default function Board() {
             >
               <header>
                 <h3>{status}</h3>
-                <span className="muted">{cards.length}</span>
+                <span className="muted">{everything.length}</span>
                 {last && <span className="done-mark" title="Items here are done">✓</span>}
               </header>
               <div className="cards-col">
@@ -161,6 +170,14 @@ export default function Board() {
                   );
                 })()}
               </div>
+              {last && more > 0 && (
+                <button className="add-card" onClick={() => setDoneShown(doneShown + DONE_PAGE)}>
+                  Show {Math.min(more, DONE_PAGE)} more <span className="muted">({more} older)</span>
+                </button>
+              )}
+              {last && !more && doneShown > DONE_PAGE && everything.length > DONE_PAGE && (
+                <button className="add-card" onClick={() => setDoneShown(DONE_PAGE)}>Show fewer</button>
+              )}
               {!last && <QuickAdd org={org!} projectKey={key!} status={status} onAdded={reload} />}
             </section>
           );
