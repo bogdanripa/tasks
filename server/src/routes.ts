@@ -538,6 +538,11 @@ export function apiRoutes(app: FastifyInstance) {
     }),
     agent: true,
   }, async (req, { body }) => d.updateItem(await requireActor(req), req.params['*'], body));
+  route(app, 'DELETE', '/api/items/*', {
+    section: 'Items',
+    summary: 'delete an item (people only: an admin or its creator); an issue takes its tasks with it',
+    wildcard: 'ref',
+  }, async (req) => d.deleteItem(await requireActor(req), req.params['*']));
   route(app, 'POST', '/api/comments/*', {
     section: 'Items',
     summary: 'comment on an item',

@@ -914,7 +914,20 @@ const looseNow = await api('GET', `/api/items/${loose.ref}`);
 assert.equal(looseNow.item.assigneeKind, 'human');
 assert.ok(looseNow.history.some((e: any) => e.data?.byReply));
 console.log('✓ replying on an unassigned item assigns it to the person');
-// Start now: skip the quiet period on an item waiting for its agent.
+// Deleting: people only (an admin or the creator); an issue takes its tasks; what they blocked is freed.
+const doomed = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Doomed', status: 'Backlog' });
+const doomedTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: doomed.ref, title: 'Doomed task', status: 'Backlog' });
+const doomedWaits = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Waits on a doomed task', status: 'Backlog', assignee: house.agent.id });
+await api('POST', '/api/links', { from: doomedTask.ref, to: doomedWaits.ref, kind: 'blocks' });
+await assert.rejects(api('DELETE', `/api/items/${doomed.ref}`, undefined, house.key.key), /→ 40[13]/, 'agents can’t delete');
+assert.deepEqual(await api('DELETE', `/api/items/${doomed.ref}`), { deleted: doomed.ref, tasks: 1 });
+await assert.rejects(api('GET', `/api/items/${doomedTask.ref}`), /→ 404/, 'its tasks go with it');
+assert.ok((await api('GET', `/api/items/${doomedWaits.ref}`)).history.some((e: any) => e.type === 'item.deleted' && e.data.blocked));
+assert.ok((await api('GET', `/api/agents/${house.agent.id}`)).deliveries.some((n: any) => n.itemRef === doomedWaits.ref && n.reason === 'unblocked'), 'what it blocked is freed');
+const deletedEvent = (await api('GET', `/api/projects/${org}/WEB/timeline`)).find((e: any) => e.type === 'item.deleted' && !e.data.blocked);
+assert.equal(deletedEvent?.data.ref, doomed.ref, 'the timeline keeps a line for it');
+console.log('✓ delete: people only, an issue takes its tasks, blocked work is freed, the timeline remembers');
+// Start now: skip the quiet period on an item doomedWaits for its agent.
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
 const soon = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Start me now', status: 'Todo', assignee: house.agent.id });
 const listed = (await api('GET', `/api/projects/${org}/WEB`)).items.find((i: any) => i.ref === soon.ref);

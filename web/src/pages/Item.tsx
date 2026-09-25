@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Event } from '../api';
+import { useSession } from '../App';
 import { Avatar, EditableMarkdown, ErrorNote, EventRow, KindBadge, Markdown, Modal, SkillChip, RefLink, Time, TypeBadge, linkVerb, useFetch, Working } from '../ui';
 
 export default function ItemPage() {
@@ -12,6 +13,8 @@ export default function ItemPage() {
   const [editing, setEditing] = useState<'title' | null>(null);
   const [draft, setDraft] = useState('');
   const [modal, setModal] = useState<'task' | 'link' | 'trigger' | null>(null);
+  const { me } = useSession();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const t = setInterval(() => document.visibilityState === 'visible' && !editing && reload(), 15_000);
@@ -213,6 +216,23 @@ export default function ItemPage() {
             <br />
             Updated <Time iso={item.updatedAt} />
           </div>
+          {(item.createdBy === me.id || me.orgs.find((o) => o.slug === org)?.role !== 'member') && (
+            <button
+              className="small ghost danger"
+              onClick={async () => {
+                const open = tasks.length ? ` and its ${tasks.length} task${tasks.length === 1 ? '' : 's'}` : '';
+                if (!confirm(`Delete ${item.ref.split('/')[1]}${open}? Comments, links and history go too. This can't be undone.`)) return;
+                try {
+                  await api('DELETE', `/api/items/${fullRef}`, undefined, { toast: 'Deleted' });
+                  navigate(`/${org}/${project.key}`);
+                } catch (e) {
+                  setOpError((e as Error).message);
+                }
+              }}
+            >
+              Delete {item.type}
+            </button>
+          )}
 
           <h2>History</h2>
           <ul className="events compact">

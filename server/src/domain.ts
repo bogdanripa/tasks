@@ -1011,6 +1011,40 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
   return resolveItem(actor, item.id);
 }
 
+/**
+ * People delete items: an admin, or whoever created it. An issue takes its tasks with it, and comments, links and
+ * history go too, so the project timeline keeps a line saying what was deleted. Work it was the last open
+ * blocker of can start. Not while an agent is working on it: its run would lose its item mid-way.
+ */
+export async function deleteItem(actor: Actor, ref: string) {
+  if (actor.kind !== 'human') throw forbidden('Only people can delete items');
+  const item = await resolveItem(actor, ref);
+  if (item.createdBy !== actor.id && (await orgRole(actor.id, item.orgId)) === 'member') {
+    throw forbidden('Only an admin or the person who created it can delete it');
+  }
+  return mutate(async (tx) => {
+    const ids: string[] = (await tx`select id from items where id = ${item.id} or parent_id = ${item.id}`).map((r) => r.id);
+    const [busy] = await tx`select 1 from agent_runs where item_id in ${tx(ids)} and finished_at is null limit 1`;
+    if (busy) throw badRequest('An agent is working on it. Wait for its run to end, or end the run on the agent’s Activity tab.');
+    const freed = await tx`
+      select distinct t.id, t.assignee_id from links l
+      join items b on b.id = l.from_id and b.closed_at is null
+      join items t on t.id = l.to_id and t.closed_at is null
+      where l.from_id in ${tx(ids)} and l.kind = 'blocks' and l.removed_at is null and t.id not in ${tx(ids)}
+        and not exists (select 1 from links o join items ob on ob.id = o.from_id
+                        where o.to_id = t.id and o.kind = 'blocks' and o.removed_at is null and ob.closed_at is null
+                          and ob.id not in ${tx(ids)})`;
+    await tx`delete from items where id = ${item.id}`; // tasks, comments, links, history and runs cascade
+    const data = { ref: item.ref, title: item.title, type: item.type, tasks: ids.length - 1 };
+    await emit(tx, { orgId: item.orgId, projectId: item.projectId, actorId: actor.id, type: 'item.deleted', data });
+    for (const f of freed) {
+      const ev = await emit(tx, { orgId: item.orgId, projectId: item.projectId, itemId: f.id, actorId: actor.id, type: 'item.deleted', data: { ...data, blocked: true } });
+      await notify(tx, f.assigneeId, ev, f.id, 'unblocked', actor);
+    }
+    return { deleted: item.ref, tasks: ids.length - 1 };
+  });
+}
+
 /** A run says it's done without changing its task's status (e.g. an issue that now waits on its tasks). */
 export async function endRun(actor: Actor) {
   if (!actor.keyId) throw badRequest('Only a routine run (its run token) can end a run');

@@ -108,6 +108,10 @@ export function describe(e: Event, showItem: boolean): ReactNode {
       if (c.body) parts.push(<>edited the description{showItem && <> of {item}</>}</>);
       return parts.map((p, i) => <span key={i}>{i > 0 && ', '}{p}</span>);
     }
+    case 'item.deleted':
+      return d.blocked
+        ? <>deleted {d.ref.split('/')[1]} <q>{d.title}</q>, which blocked {item || 'this'}</>
+        : <>deleted {d.type} {d.ref.split('/')[1]} <q>{d.title}</q>{d.tasks ? ` and its ${d.tasks} task${d.tasks === 1 ? '' : 's'}` : ''}</>;
     case 'task.added':
       return <>added task <RefLink refStr={d.ref} /> <q>{d.title}</q>{showItem && <> to {item}</>}</>;
     case 'comment.created':

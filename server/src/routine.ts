@@ -127,7 +127,7 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
       const said = c.blockerComment
         ? `. Its last comment, from ${c.blockerCommentAuthor}:\n${String(c.blockerComment).slice(0, commentLimit).split('\n').map((l: string) => `    > ${l}`).join('\n')}`
         : '';
-      return `${d.ref} ${q(d.title ?? '')}, which blocked this, is done${said}`;
+      return `${d.ref} ${q(d.title ?? '')}, which blocked this, ${d.blocked ? 'was deleted' : `is done${said}`}`;
     }
     case 'triggered_item_done':
       return `${d.ref} ${q(d.title ?? '')}, which this triggered, is done`;
