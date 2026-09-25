@@ -158,3 +158,11 @@ footer a { color: var(--muted); }
   .mock { grid-template-columns: 1fr; }
   .wrap { padding: 0 16px; }
 }
+
+/* article */
+.article { max-width: 720px; margin: 0 auto; padding: 56px 0 88px; }
+.article h1 { font-size: 42px; margin: 0 0 16px; }
+.article .lead { font-size: 20px; color: var(--muted); margin: 0 0 24px; }
+.article p { font-size: 17px; line-height: 1.7; }
+.article td:first-child { font-weight: 600; white-space: nowrap; }
+@media (max-width: 520px) { .article h1 { font-size: 32px; } .article { padding-top: 32px; } }

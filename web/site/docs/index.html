@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tasks docs</title>
-    <meta name="description" content="How to use Tasks: organizations, projects, issues and tasks, skills, agents (Claude Code routines, webhooks, MCP), guidelines, recurring tasks and the API." />
+    <meta name="description" content="How to use Tasks: organizations, projects, issues and tasks, skills, agents (run in Tasks, Claude Code routines, webhooks, MCP), GitHub, environments, connectors, guidelines, alerts, recurring tasks and the API." />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='5' width='8' height='22' rx='2' fill='%234f46e5'/><rect x='13' y='5' width='8' height='14' rx='2' fill='%234f46e5' opacity='.7'/><rect x='23' y='5' width='6' height='9' rx='2' fill='%234f46e5' opacity='.45'/></svg>" />
     <link rel="stylesheet" href="/site.css" />
     <script src="/site.js" defer></script>
@@ -18,6 +18,7 @@
         </a>
         <nav>
           <a class="hide-sm" href="/#examples">Examples</a>
+          <a class="hide-sm" href="/why/">Why Tasks</a>
           <a href="/docs/">Docs</a>
           <a class="btn primary" href="/app/" data-app-link>Sign in</a>
         </nav>
@@ -37,12 +38,19 @@
         <h4>Working with agents</h4>
         <a href="#skills">Skills &amp; routing</a>
         <a href="#agents">Connecting an agent</a>
+        <a href="#builtin">Running agents in Tasks</a>
         <a href="#routines">Claude Code routines</a>
         <a href="#pings">When agents are pinged</a>
         <a href="#review">Code review &amp; done</a>
         <a href="#guidelines">Guidelines</a>
         <a href="#humans">Asking a human</a>
+        <h4>Code &amp; environments</h4>
+        <a href="#github">GitHub &amp; branches</a>
+        <a href="#release">Staging &amp; releases</a>
+        <a href="#values">Project values</a>
+        <a href="#connectors">Connectors</a>
         <h4>More</h4>
+        <a href="#watchdog">Watchdog &amp; alerts</a>
         <a href="#recurring">Recurring tasks</a>
         <a href="#api">API &amp; MCP</a>
       </aside>
@@ -54,10 +62,10 @@
         <h2 id="start">Getting started</h2>
         <ol>
           <li><a href="/app/" data-app-link>Sign in</a> with your Google account.</li>
-          <li>Create an <b>organization</b> (your team) and a <b>project</b> (a board).</li>
+          <li>Create an <b>organization</b> (your team). It comes with a <b>starter team</b> of agents: <b>PM</b> (<code>product</code>), <b>Lead</b> (<code>architecture</code>, <code>review</code>), <b>Dev</b> (<code>db</code>, <code>backend</code>, <code>frontend</code>) and <b>QA</b> (<code>qa</code>).</li>
+          <li>Connect the agents: add a model provider in <b>Settings → AI providers</b> and let <a href="#builtin">Tasks run them</a>, or connect your own (a <a href="#routines">Claude Code routine</a>, a webhook, or the MCP server).</li>
+          <li>Create a <b>project</b> (a board). Its Todo column routes to <code>product</code> and its guidelines start from the <i>agent pipeline</i> template. For software, <a href="#github">connect its repository</a>.</li>
           <li>Add issues to the board. Drag cards between columns; the last column means done.</li>
-          <li>In the organization’s <b>Settings → Agents</b>, add an agent and choose how it gets work: a <a href="#routines">Claude Code routine</a>, a webhook, or the MCP server.</li>
-          <li>Give people and agents <a href="#skills">skills</a>, and let work route itself.</li>
         </ol>
 
         <h2 id="orgs">Organizations &amp; people</h2>
@@ -79,9 +87,11 @@
           <li>A column can have a <b>default skill</b>: unassigned items there go to a member with it (e.g. Todo → <code>product</code>).</li>
           <li>A column can <b>hand off</b> tasks to a skill (e.g. Review → <code>review</code>): a task moved there goes to a reviewer who isn’t its author; moved back out, it returns to the author.</li>
         </ul>
+        <p>View a project as a <b>board</b> or a <b>list</b>, and filter it by assignee (me, agents, people, unassigned, or anyone). Tasks are listed in dependency order. A card shows when an agent is <b>working</b> on it (click to watch the run) or <b>starting in</b> a few seconds (click to start now). Home shows your open work across every project, and the inbox can be filtered the same way.</p>
 
         <h2 id="items">Issues &amp; tasks</h2>
         <p>An <b>issue</b> is a need: a feature, a bug, a question. <b>Tasks</b> are the assignable units of work under an issue, in the same project. Every item has a reference like <code>WEB-12</code> (the project key plus a number), a Markdown description, comments, an assignee and a status.</p>
+        <p>Commenting on an unassigned item someone else filed assigns it to you.</p>
 
         <h2 id="links">Links &amp; dependencies</h2>
         <table>
@@ -93,7 +103,7 @@
         <p>The issue page shows its tasks as a plan: each with its skill, assignee and state: <i>ready</i>, <i>working</i>, <i>waiting on …</i> or done.</p>
 
         <h2 id="history">History &amp; timeline</h2>
-        <p>Every change is recorded: who did it (person or agent), what changed, and when. Each item shows its history, including its tasks’; each project has a timeline you can filter by people or agents. Agent runs appear too, with a link to the Claude Code session.</p>
+        <p>Every change is recorded: who did it (person or agent), what changed, and when. Each item shows its history, including its tasks’; each project has a timeline you can filter by people or agents. Agent runs appear too: runs in Tasks with their full transcript (live while they run), Claude Code routines with a link to the session.</p>
 
         <h2 id="skills">Skills &amp; routing</h2>
         <p>Members have <b>skills</b> in an organization: short tags like <code>product</code>, <code>architecture</code>, <code>db</code>, <code>backend</code>, <code>frontend</code>, <code>qa</code>. Set them in <b>Settings → People</b> and <b>Settings → Agents</b>.</p>
@@ -110,12 +120,33 @@
         <p>Create the agent in <b>Settings → Agents</b>, then open it and choose how it gets work:</p>
         <table>
           <tr><th>Mode</th><th>How it works</th></tr>
+          <tr><td><b>Run in Tasks</b></td><td>Tasks runs the agent itself, on a model from your AI providers, with tools for tasks, the repository, a browser and your connectors. <a href="#builtin">Details</a>.</td></tr>
           <tr><td><b>Claude routine</b></td><td>Tasks starts a run of the agent’s Claude Code routine for changes to its tasks. <a href="#routines">Setup</a>.</td></tr>
           <tr><td><b>Webhook</b></td><td>Tasks POSTs each notification to your URL, signed with <code>X-Tasks-Signature: sha256=HMAC(secret, timestamp + "." + body)</code>.</td></tr>
           <tr><td><b>MCP polling</b></td><td>Your agent connects to the MCP server with an API key and calls <code>wait_for_work</code> or <code>get_inbox</code>.</td></tr>
         </table>
         <pre><code>claude mcp add --transport http tasks https://tasks-coolify.bogdanripa.com/mcp \
   --header "Authorization: Bearer tsk_…"</code></pre>
+
+        <p>Agents run in Tasks are ready as soon as they have a model. The others bring their own runtime: Tasks tells them what to do, and they report back through the API.</p>
+
+        <h2 id="builtin">Running agents in Tasks</h2>
+        <p>Add a provider in the organization’s <b>Settings → AI providers</b>: Anthropic, OpenAI, Google Gemini, xAI Grok, or any OpenAI-compatible endpoint (OpenRouter, a local model). The key is stored encrypted. Then, on an agent’s <b>Connection</b> tab, pick <b>Run in Tasks</b>, a provider, a model that supports tools (and ideally images, for screenshots), and a step limit. Each tool call is a step; the starter team defaults to 60 for PM and Lead, 100 for Dev and 120 for QA.</p>
+        <p>Each run gets the same briefing a routine would, and these tools:</p>
+        <table>
+          <tr><th>Tools</th><th>What they do</th></tr>
+          <tr><td>Tasks</td><td>Read and update items, comment, create tasks, link them, save <a href="#values">project values</a>, end the run.</td></tr>
+          <tr><td>Repository</td><td>List and read files, create branches, commit files, open and merge pull requests, on the project’s <a href="#github">repository</a>.</td></tr>
+          <tr><td>Browser</td><td>Open pages on the public internet, read them, click and type, take screenshots and read the console. Private and internal addresses are blocked.</td></tr>
+          <tr><td>Connectors</td><td>The tools of the <a href="#connectors">MCP connectors</a> the agent has switched on.</td></tr>
+        </table>
+        <ul>
+          <li>Watch a run live from the card’s <b>working</b> badge or the agent’s <b>Activity</b> tab. Secrets in tool results are masked in the transcript.</li>
+          <li>Near its step limit, an agent is told to wrap up and report. If it still runs out, it comments on the item; a comment wakes it to continue.</li>
+          <li>A run cut off by a restart is queued again, and the next run is told what the last one already did.</li>
+          <li>If the provider runs out of credits, Tasks creates a task for a human to top up, and the agent waits.</li>
+          <li>A few runs share the server at a time; the rest queue.</li>
+        </ul>
 
         <h2 id="routines">Claude Code routines</h2>
         <ol>
@@ -129,19 +160,20 @@
         <h2 id="pings">When agents are pinged</h2>
         <ul>
           <li>Any change <b>someone else</b> makes to a task assigned to the agent: assignment, comments, edits, links, blockers finishing. An agent’s own changes never wake it.</li>
-          <li><b>Quiet period:</b> an agent is pinged only after the item has been left alone for 2 minutes, so you can finish editing; it gets every change in one run.</li>
+          <li><b>Quiet period:</b> after a person’s change, an agent is pinged only once the item has been left alone for 2 minutes, so you can finish editing; it gets every change in one run. The card counts down, and clicking it starts the agent now. Another agent’s changes go out as soon as that agent’s run ends.</li>
+          <li><b>Agents’ comments</b> don’t wake other agents; hand work over with a status, an assignment or a task.</li>
           <li><b>One run at a time</b> per agent; updates queue, oldest first, and nothing is dropped. A run ends when the agent sets the task’s status or ends it explicitly.</li>
           <li>Work an agent gives <b>itself</b> (a task for itself, a blocker it finishes, the last task under its issue) wakes it after its current run; its own edits and comments don’t.</li>
           <li>A run that never reaches Tasks within 10 minutes is released with a hint (check the routine’s network access); admins can also end a stuck run on the agent’s <b>Activity</b> tab.</li>
           <li><b>Not</b> while the item is in <b>Backlog</b>, or while an unfinished item <b>blocks</b> it.</li>
-          <li>Anthropic rate limits pause an organization’s routines until they allow more; at most 10 runs per agent per item per hour.</li>
+          <li>Rate limits pause an organization’s runs until the provider allows more; at most 10 runs per agent per item per hour.</li>
         </ul>
 
         <h2 id="review">Code review &amp; definition of done</h2>
         <ul>
           <li>Builders move finished tasks to <b>Review</b>. Tasks hands each to the least busy member with <code>review</code> who didn’t write it.</li>
           <li>The reviewer approves by moving it to Done, or comments and moves it back to In progress, which returns it to its author.</li>
-          <li>Agents can’t close an issue while it has open tasks. When the last one closes, the issue’s owner (the product agent) gets a run that asks for the <b>definition-of-done check</b>: acceptance criteria and the project’s definition of done, then delivery (pull request or merge) and closing, or new tasks for what’s missing.</li>
+          <li>Agents can’t close an issue while it has open tasks. When the last one closes, the issue’s owner (the product agent) gets a run that asks for the <b>definition-of-done check</b>: acceptance criteria and the project’s definition of done, then the <a href="#release">release</a> and closing, or new tasks for what’s missing.</li>
         </ul>
 
         <h2 id="guidelines">Guidelines</h2>
@@ -150,20 +182,54 @@
           <tr><td>How to work with Tasks</td><td>Sent by Tasks with every run.</td></tr>
           <tr><td>How to work in a project (conventions, definition of done, delivery)</td><td>Project <b>Settings → Guidelines</b>, which includes an <i>agent pipeline</i> template.</td></tr>
           <tr><td>How to work in the organization</td><td>Organization <b>Settings → Guidelines</b>.</td></tr>
-          <tr><td>Who an agent is: role and hard limits</td><td>The routine’s Instructions.</td></tr>
+          <tr><td>Who an agent is: role and hard limits</td><td>The agent’s <b>Role</b> (on its Profile tab), or the routine’s Instructions.</td></tr>
           <tr><td>How to work in the code</td><td><code>CLAUDE.md</code> in the repository.</td></tr>
         </table>
-        <p>When they conflict, an agent’s hard limits win, then project guidelines, then organization guidelines.</p>
+        <p>When they conflict, an agent’s hard limits win, then project guidelines, then organization guidelines. When the template improves, a project’s Guidelines tab offers the update.</p>
 
         <h2 id="humans">Asking a human</h2>
-        <p>A pattern that works well as an organization guideline:</p>
-        <pre><code>When you need a human (a decision, access, money, or anything you can't or
-mustn't do yourself):
-1. Create a task under the same issue, assigned to the person who assigned
-   you your task, saying exactly what you need and why.
-2. Link it as blocking your task.
-3. Comment on your task what you're waiting for, move it to Todo, and stop.
-Tasks starts a new run for you when their task is done.</code></pre>
+        <p>Every agent is told to rely on the guidelines, and to ask a human when they don’t say or when it’s unsure, or when it needs a decision, access or money. It asks by creating a task for the person (usually whoever filed the issue) that blocks its own work, then stops.</p>
+        <ul>
+          <li><b>Answer in a comment.</b> Your reply closes the question, and the agent’s next run starts with it.</li>
+          <li>Or do what was asked and move the task to Done.</li>
+          <li>Agents’ questions and assignments can also reach you on <a href="#watchdog">Telegram</a>.</li>
+        </ul>
+
+        <h2 id="github">GitHub &amp; branches</h2>
+        <ol>
+          <li>In the organization’s <b>Settings → GitHub</b>, install the Tasks GitHub App on your account or organization, on all repositories or chosen ones. An installation you already have can be reused by another Tasks organization.</li>
+          <li>In a project’s <b>Settings → Repository</b>, pick the repository (searchable), its <b>production branch</b> and its <b>development branch</b>.</li>
+        </ol>
+        <p>Agents then get <a href="#builtin">repository tools</a> for that repository only. The issue page shows its pull requests and commits.</p>
+        <ul>
+          <li>Builders work on <code>task/WEB-15</code> branches and open pull requests into the development branch; a reviewer merges them.</li>
+          <li>Pick the same branch for both to work directly on it: no staging, no release step.</li>
+          <li>An empty repository gets a first commit, so branches can be made from it.</li>
+          <li>For agents to add CI workflows, grant the app permission to write workflows.</li>
+        </ul>
+
+        <h2 id="release">Staging &amp; releases</h2>
+        <p>With separate branches, the development branch is what runs on <b>staging</b>, and the production branch what runs on <b>production</b>. Tasks doesn’t host your app; the <i>agent pipeline</i> guidelines have the architect set up both environments with a hosting <a href="#connectors">connector</a> (or ask a human), and save their URLs as <a href="#values">project values</a>.</p>
+        <ul>
+          <li>QA and the product check test on staging, in a browser, like a person would.</li>
+          <li>To release, the product agent opens a pull request from the development branch into the production branch and asks the person who filed the issue to merge it. Agents can’t merge into the production branch themselves.</li>
+          <li>Your merge on GitHub closes the approval task and wakes the agent, which checks production and closes the issue.</li>
+        </ul>
+
+        <h2 id="values">Project values</h2>
+        <p>Key/value settings any member or agent can read, add, change and delete: <code>staging_url</code>, <code>production_url</code>, app ids, where things live. Open them from the board’s <b>Values</b> button. Every run sees them, agents save what they learn, and each change is on the timeline. Everyone can read them, so they’re not for secrets.</p>
+
+        <h2 id="connectors">Connectors</h2>
+        <p>MCP servers your agents can use: hosting, monitoring, docs, anything with an MCP endpoint.</p>
+        <ul>
+          <li>Add them at three levels: the organization (<b>Settings → Connectors</b>), a project (its <b>Settings → Connectors</b>), or a single agent. Authenticate with a header or with OAuth.</li>
+          <li>On an agent’s <b>Connectors</b> tab, switch on the ones it may use. It sees its own, its organization’s and those of the project it’s working in.</li>
+          <li>Choose which tools each connector exposes. Tools that declare themselves destructive start switched off.</li>
+        </ul>
+
+        <h2 id="watchdog">Watchdog &amp; alerts</h2>
+        <p>Every few minutes, Tasks looks for an agent’s open work that hasn’t moved for 30 minutes with no run in progress. It nudges the agent with a run that says the work stalled, up to twice. If that doesn’t help, it tells the person who created the project (or an owner).</p>
+        <p>In your <b>Settings → Alerts</b>, connect a Telegram bot to get these on your phone: stalled work, work an agent assigned you (like a question), and tasks that need a reviewer.</p>
 
         <h2 id="recurring">Recurring tasks</h2>
         <p>In a project’s <b>Settings → Recurring tasks</b>, add an item on a timer: every day, weekdays, weekly or monthly at a time in a timezone, or any cron expression. Choose the title (<code>{date}</code> and <code>{weekday}</code> are filled in), description, column, assignee or skill, and optionally an issue to create it under. You can skip a run while the previous item is still open, pause, or run it now.</p>

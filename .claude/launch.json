@@ -12,6 +12,18 @@
       ],
       "port": 5180,
       "url": "http://localhost:5180"
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5190",
+        "-d",
+        "web/site"
+      ],
+      "port": 5190
     }
   ]
 }
