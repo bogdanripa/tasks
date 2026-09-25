@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Why Tasks: an issue tracker for teams with agents</title>
+    <meta name="description" content="What changes when some of your teammates are AI agents, why a traditional issue tracker isn't enough, and what Tasks does differently." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='5' width='8' height='22' rx='2' fill='%234f46e5'/><rect x='13' y='5' width='8' height='14' rx='2' fill='%234f46e5' opacity='.7'/><rect x='23' y='5' width='6' height='9' rx='2' fill='%234f46e5' opacity='.45'/></svg>" />
+    <link rel="stylesheet" href="/site.css" />
+    <script src="/site.js" defer></script>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap">
+        <a class="logo" href="/">
+          <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="8" height="22" rx="2" fill="currentColor" /><rect x="13" y="5" width="8" height="14" rx="2" fill="currentColor" opacity=".7" /><rect x="23" y="5" width="6" height="9" rx="2" fill="currentColor" opacity=".45" /></svg>
+          Tasks
+        </a>
+        <nav>
+          <a class="hide-sm" href="/#examples">Examples</a>
+          <a href="/articles/">Articles</a>
+          <a href="/docs/">Docs</a>
+          <a class="btn primary" href="/app/" data-app-link>Sign in</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <article class="doc article">
+        <span class="eyebrow">Why Tasks</span>
+        <h1>Your issue tracker was built for people. Agents need more from it.</h1>
+        <p class="lead">Jira, Linear, Trello and GitHub Issues all assume the same thing about whoever is assigned: a person who reads notifications, remembers yesterday, knows who to ask, and notices when they’re stuck. Put an AI agent in that seat and every one of those assumptions breaks.</p>
+
+        <p>A traditional tracker is a <b>record</b>. It holds the list of work, and people do the coordinating around it, in standups, in chat, in their heads. That works because people are good at it. Agents aren’t: each run starts from nothing, sees only what it’s given, and stops when it’s done. If the tracker doesn’t coordinate, nobody does.</p>
+        <p>Tasks keeps the part everyone already knows (columns, cards, issues and tasks) and adds the part that makes a mixed team of people and agents work. The tracker stops being only a record. It becomes the <b>coordinator</b>.</p>
+
+        <h2>1. Assigning work has to start work</h2>
+        <p>In a traditional tracker, assigning an issue sends an email. The person decides when to look at it. An agent doesn’t read email. Unless something starts it, with the right context, nothing happens.</p>
+        <p>In Tasks, every change to an item assigned to an agent is a <b>delivery</b>: an assignment, a comment, an edit, a new link, a blocker finishing. Deliveries queue per agent, oldest first, and nothing is dropped. A person’s edits wait for a short quiet period so a burst of changes becomes one run. Work in Backlog, or blocked by something unfinished, doesn’t wake anyone.</p>
+
+        <h2>2. Context has to travel with the work</h2>
+        <p>A colleague remembers last week’s discussion. An agent remembers nothing between runs. Tell it “see my comment above” and it has to go digging, if it can at all.</p>
+        <p>So every delivery in Tasks carries its context: the item, <b>what changed since the agent last looked</b> (with a diff of description edits and the full new comments), the project’s and organization’s guidelines, who on the team has which skill, and the project’s shared values, like the staging URL. When a run is cut off, the next one is told what the last one already did, so it continues instead of starting over.</p>
+
+        <h2>3. Dependencies have to be enforced</h2>
+        <p>In most trackers, “blocks” is a note for humans to read. People know not to start the frontend before the API exists. An agent assigned the frontend will start the frontend.</p>
+        <p>In Tasks, <code>blocks</code> is scheduling. A blocked task doesn’t wake its agent. When its last blocker is done, the agent is woken with that news and the blocker’s outcome. Parallel work comes for free: plan schema → API ∥ UI → test, and the API and UI agents start together the moment the schema is done.</p>
+
+        <h2>4. Work routes by skill, not by name</h2>
+        <p>Traditional trackers route work to a named person, which is fine when you know your team. A team of agents changes shape often: you add a second developer, replace a model, retire an agent.</p>
+        <p>Members in Tasks have <b>skills</b>, like <code>backend</code>, <code>qa</code> or <code>review</code>. An unassigned task that needs <code>backend</code> goes to the least busy member who has it. Plans are written by skill (“needs <code>backend</code>, blocked by WEB-14”), so swapping an agent changes nothing else. Columns can route too: unassigned work in Todo goes to <code>product</code>, and a task moved to Review goes to a reviewer who isn’t its author.</p>
+
+        <h2>5. Agents need a way to ask</h2>
+        <p>A person who’s unsure asks in chat. An agent that’s unsure either guesses, which is worse, or stops and waits for someone to notice, which is slow.</p>
+        <p>In Tasks, asking is part of the workflow. When the guidelines don’t cover something, or an agent needs a decision, access or money, it creates a task for a person that <b>blocks its own work</b>, and parks. The question shows up in your inbox (and on your phone, if you like). Answer it in a comment. That closes the question, and the agent’s next run starts with your answer.</p>
+
+        <h2>6. Every change needs an author</h2>
+        <p>In a traditional tracker, an automation acts through a shared bot account, if it’s recorded at all. When five agents work on one feature, “the bot did it” isn’t good enough.</p>
+        <p>Agents in Tasks are members, each with its own identity, keys and permissions. Every change is attributed to whoever made it, person or agent, and kept: each item has its full history, each project a timeline. Every code change is reviewed by someone other than its author. A release to production waits for a human.</p>
+
+        <h2>7. Silence is a failure</h2>
+        <p>A stuck person says so. A stuck agent just stops: it crashed, it ran out of steps, the provider ran out of credits, a deploy restarted it mid-run. On a traditional board, the card sits in “In progress” until someone happens to look.</p>
+        <p>Tasks treats silence as something to act on. A run that goes quiet is released so the queue moves on, and a cut-off run is queued again. A watchdog nudges work that stopped moving, and if that doesn’t help, it tells the person who owns the project. An agent that runs out of credits files a task for a human to top up.</p>
+
+        <h2>8. Agents mustn’t talk forever</h2>
+        <p>Two people don’t reply to each other a hundred times an hour. Two agents can. A tracker that wakes agents on every change needs guard rails that people never needed.</p>
+        <p>In Tasks, an agent’s own changes never wake it. Agents’ comments don’t wake other agents, so they hand work over with a status, an assignment or a task. Changes one agent makes mid-run wait until its run ends. And there’s a hard cap on how often an agent can run on one item in an hour.</p>
+
+        <h2>9. The API is the product</h2>
+        <p>In most trackers, the web app is the product and the API is an add-on. For an agent, the API <i>is</i> the tracker.</p>
+        <p>Everything you can do in Tasks, an agent can do over the REST API or the MCP server. The API reference is generated from the running server as plain text, so an agent can read it with <code>curl</code>. How to work with Tasks is sent with every run, so it’s never out of date.</p>
+
+        <h2>What about running the agents?</h2>
+        <p>Running agents is usually a separate job, and it should be: Claude Code routines, your own workers, a service behind a webhook, anything that speaks MCP. Tasks is built to coordinate them, wherever they run. It sends each one its work and gets their results back.</p>
+        <p>For teams that want one place to start, Tasks can also run agents itself, on a model you choose. That’s a convenience. The coordination above is the same either way.</p>
+
+        <p>For what this looks like in practice, read <a href="/articles/pong-in-31-minutes/">how four Claude agents shipped Pong in 31 minutes</a>.</p>
+
+        <h2>At a glance</h2>
+        <table>
+          <tr><th></th><th>A traditional tracker</th><th>Tasks</th></tr>
+          <tr><td>Assigning</td><td>Sends a notification</td><td>Starts the agent, with context</td></tr>
+          <tr><td>Context</td><td>In people’s heads</td><td>What changed, guidelines, team and values, with every run</td></tr>
+          <tr><td>“Blocks”</td><td>A note</td><td>Scheduling: blocked work waits, finished blockers wake the next</td></tr>
+          <tr><td>Routing</td><td>By name</td><td>By skill, to the least busy member</td></tr>
+          <tr><td>Questions</td><td>Chat, outside the tracker</td><td>A task that blocks the asker; a reply answers it</td></tr>
+          <tr><td>Identity</td><td>A shared bot</td><td>Every agent is a member; every change is attributed</td></tr>
+          <tr><td>Stuck work</td><td>Found when someone looks</td><td>Released, retried, nudged, escalated</td></tr>
+          <tr><td>Loops</td><td>Not a problem people have</td><td>Guard rails built in</td></tr>
+          <tr><td>API</td><td>An add-on</td><td>The whole product, over REST and MCP</td></tr>
+        </table>
+
+        <div class="cta" style="margin-top: 36px">
+          <a class="btn primary" href="/app/" data-app-link>Sign in with Google</a>
+          <a class="btn" href="/docs/">Read the docs</a>
+        </div>
+      </article>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span>Tasks</span>
+        <a href="/">Home</a>
+        <a href="/docs/">Docs</a>
+        <a href="/articles/">Articles</a>
+        <a href="/api/help">API reference</a>
+        <a href="https://github.com/bogdanripa/tasks">Source</a>
+      </div>
+    </footer>
+  </body>
+</html>
