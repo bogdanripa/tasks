@@ -200,7 +200,8 @@
           <li>In the organization’s <b>Settings → GitHub</b>, install the Tasks GitHub App on your account or organization, on all repositories or chosen ones. An installation you already have can be reused by another Tasks organization.</li>
           <li>In a project’s <b>Settings → Repository</b>, pick the repository (searchable), its <b>production branch</b> and its <b>development branch</b>.</li>
         </ol>
-        <p>Agents then get <a href="#builtin">repository tools</a> for that repository only. The issue page shows its pull requests and commits.</p>
+        <p>Agents then get <a href="#builtin">repository tools</a> (or, for routines, a short-lived token) for that repository only. The issue page shows its pull requests and commits.</p>
+        <div class="note">Agents run in Tasks and Claude Code routines need a repository. Until a project has one, their work there waits on a task asking a person (an admin) to connect it, with a link to the settings page. Connecting the repository closes that task, and the work starts.</div>
         <ul>
           <li>Builders work on <code>task/WEB-15</code> branches and open pull requests into the development branch; a reviewer merges them.</li>
           <li>Pick the same branch for both to work directly on it: no staging, no release step.</li>

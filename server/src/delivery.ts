@@ -28,6 +28,7 @@ async function deliverDue() {
            v.closed_at is not null as item_closed,
            exists (select 1 from links l join items b on b.id = l.from_id
                    where l.to_id = n.item_id and l.kind = 'blocks' and l.removed_at is null and b.closed_at is null) as item_blocked,
+           (v.id is not null and p.github_repo is null) as item_needs_repo,
            e.type as event_type, e.data as event_data, actor.id as actor_id, actor.name as actor_name, actor.kind as actor_kind,
            v.ref as item_ref, v.title as item_title, v.type as item_type, v.status as item_status
     from notifications n
@@ -35,6 +36,7 @@ async function deliverDue() {
     join events e on e.id = n.event_id
     join accounts actor on actor.id = e.actor_id
     left join item_view v on v.id = n.item_id
+    left join projects p on p.id = v.project_id
     where n.delivery_status = 'pending' and n.next_attempt_at <= now()
     order by n.id limit ${BATCH}`;
 

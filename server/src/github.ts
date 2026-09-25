@@ -4,7 +4,7 @@ import { sql } from './db.js';
 import { config } from './config.js';
 import type { Actor } from './auth.js';
 import { badRequest, fetchError, HttpError } from './errors.js';
-import { addComment, orgRole, recordEvent, resolveOrg, resolveProject, updateItem } from './domain.js';
+import { addComment, orgRole, recordEvent, repositoryConnected, resolveOrg, resolveProject, updateItem } from './domain.js';
 
 /**
  * GitHub via the Tasks GitHub App: an org installs it once (choosing repos on GitHub), each project names
@@ -223,6 +223,7 @@ export async function setProjectRepo(actor: Actor, projectRef: string, input: { 
       github_prod = ${input.prod?.trim() || sql`github_prod`}
     where id = ${project.id} returning github_repo, github_base, github_prod`;
   await recordEvent({ orgId: project.orgId, projectId: project.id, actorId: actor.id, type: 'project.updated', data: { changes: { repository: row.githubRepo } } });
+  if (row.githubRepo) await repositoryConnected(actor, project.id);
   return row;
 }
 

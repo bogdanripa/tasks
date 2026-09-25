@@ -1079,6 +1079,75 @@ export async function addComment(actor: Actor, ref: string, body: string) {
  * work. The person's reply is the answer, so the task is done: that unblocks the agent, whose next run gets
  * the reply. (To ask back instead, reopen it or answer on the agent's item.)
  */
+/** The human who created the project (from its history), or an owner of the org if they've left. */
+export async function projectOwner(projectId: string, orgId: string): Promise<string | null> {
+  const [row] = await sql`
+    select coalesce(
+      (select a.id from events e join accounts a on a.id = e.actor_id
+         join memberships m on m.account_id = a.id and m.org_id = ${orgId}
+       where e.project_id = ${projectId} and e.type = 'project.created' and a.kind = 'human' and a.deactivated_at is null limit 1),
+      (select m.account_id from memberships m join accounts a on a.id = m.account_id
+       where m.org_id = ${orgId} and m.role = 'owner' and a.kind = 'human' and a.deactivated_at is null order by m.created_at limit 1)
+    ) as id`;
+  return row?.id ?? null;
+}
+
+/**
+ * Agents that Tasks runs or starts work in the project's repository, so a project needs one before they start.
+ * Until it has one, the agent's item waits on a task asking a person to connect it (an admin: whoever asked
+ * for the work if they can, else the project's creator or an owner). One such task per project at a time;
+ * connecting the repository closes it, which starts the waiting work.
+ */
+export async function requireRepository(agent: Actor, itemId: string, askedBy: { id: string; kind: string } | null) {
+  const [item] = await sql`
+    select v.id, v.ref, v.type, v.parent_id, par.ref as parent_ref, p.id as project_id, p.org_id, p.github_repo,
+           p.repo_setup_item_id, setup.ref as setup_ref, setup.closed_at is null as setup_open
+    from item_view v join projects p on p.id = v.project_id
+    left join item_view par on par.id = v.parent_id
+    left join item_view setup on setup.id = p.repo_setup_item_id
+    where v.id = ${itemId}`;
+  if (!item || item.githubRepo) return null;
+  let setupRef: string | null = item.setupRef && item.setupOpen ? item.setupRef : null;
+  if (!setupRef) {
+    const [admin] = askedBy?.kind === 'human'
+      ? await sql`select 1 from memberships where org_id = ${item.orgId} and account_id = ${askedBy.id} and role <> 'member'`
+      : [];
+    const human = admin ? askedBy!.id : await projectOwner(item.projectId, item.orgId);
+    const project = await resolveProject(agent, item.projectId);
+    const settings = `${config.publicUrl}/app/${project.orgSlug}/${project.key}/settings?tab=repository`;
+    const setup = await createItem(agent, project, {
+      type: 'task',
+      parentRef: item.type === 'issue' ? item.ref : item.parentRef,
+      title: 'Connect a GitHub repository to this project',
+      body: [
+        `Agents on this project work in a GitHub repository, and none is connected yet, so ${item.ref.split('/')[1]} is waiting.`,
+        '',
+        `Connect one in the project's settings: ${settings}`,
+        '(If GitHub isn\'t set up for the organization yet, install the GitHub App first in the organization\'s Settings → GitHub.)',
+        '',
+        'Tasks closes this task when the repository is connected, and the waiting work starts.',
+      ].join('\n'),
+      assignee: human,
+      status: project.columns.find((c: string) => c.toLowerCase() !== 'backlog') ?? project.columns[0],
+    });
+    await sql`update projects set repo_setup_item_id = ${setup.id} where id = ${item.projectId}`;
+    setupRef = setup.ref as string;
+  }
+  const [linked] = await sql`
+    select 1 from links l join items s on s.id = l.from_id
+    where s.id = (select repo_setup_item_id from projects where id = ${item.projectId}) and l.to_id = ${itemId}
+      and l.kind = 'blocks' and l.removed_at is null`;
+  if (!linked) await addLink(agent, setupRef, item.ref, 'blocks');
+  return setupRef;
+}
+
+/** A repository was connected: close the project's open "connect a repository" task, unblocking the work behind it. */
+export async function repositoryConnected(actor: Actor, projectId: string) {
+  const [p] = await sql`
+    select p.columns, i.id from projects p join items i on i.id = p.repo_setup_item_id and i.closed_at is null where p.id = ${projectId}`;
+  if (p) await updateItem(actor, p.id, { status: p.columns[p.columns.length - 1] });
+}
+
 async function answerQuestion(actor: Actor, item: Row) {
   if (actor.kind !== 'human' || item.type !== 'task' || item.done || item.assigneeId !== actor.id) return;
   const [asked] = await sql`
@@ -1087,7 +1156,8 @@ async function answerQuestion(actor: Actor, item: Row) {
     join items b on b.id = l.to_id and b.closed_at is null and b.assignee_id = creator.id
     where creator.id = ${item.createdBy} and creator.kind = 'agent' limit 1`;
   if (!asked) return;
-  const [p] = await sql`select columns from projects where id = ${item.projectId}`;
+  const [p] = await sql`select columns, repo_setup_item_id from projects where id = ${item.projectId}`;
+  if (p.repoSetupItemId === item.id) return; // closes when the repository is connected, not on a reply
   await updateItem(actor, item.id, { status: p.columns[p.columns.length - 1] });
 }
 

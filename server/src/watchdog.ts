@@ -1,6 +1,6 @@
 import { bus, sql } from './db.js';
 import { config } from './config.js';
-import { watchdogSignal } from './domain.js';
+import { projectOwner, watchdogSignal } from './domain.js';
 
 /**
  * The watchdog looks for work that has silently stopped: an item assigned to an agent, not in Backlog, not
@@ -70,19 +70,6 @@ export async function watchdogTick(opts: { itemId?: string; stallSeconds?: numbe
       why: it.connected ? `still stalled after ${nudges} nudge${nudges === 1 ? '' : 's'}` : `${it.agentName} isn't connected, so it can't work on it`,
     });
   }
-}
-
-/** The human who created the project (from its history), or an owner of the org if they've left. */
-async function projectOwner(projectId: string, orgId: string): Promise<string | null> {
-  const [row] = await sql`
-    select coalesce(
-      (select a.id from events e join accounts a on a.id = e.actor_id
-         join memberships m on m.account_id = a.id and m.org_id = ${orgId}
-       where e.project_id = ${projectId} and e.type = 'project.created' and a.kind = 'human' and a.deactivated_at is null limit 1),
-      (select m.account_id from memberships m join accounts a on a.id = m.account_id
-       where m.org_id = ${orgId} and m.role = 'owner' and a.kind = 'human' and a.deactivated_at is null order by m.created_at limit 1)
-    ) as id`;
-  return row?.id ?? null;
 }
 
 export function startWatchdog() {

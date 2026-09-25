@@ -75,6 +75,11 @@ await api('POST', `/api/orgs/${org}/projects`, { key: 'API', name: 'Backend' });
 assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: 'Marketing site' })).key, 'MAR');
 assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: 'Website v2' })).key, 'WEB2');
 assert.equal((await api('POST', `/api/orgs/${org}/projects`, { name: '3D renders' })).key, 'DRE');
+// Agents that Tasks runs or starts need a project repository (tested with GitHub below). Projects the other
+// tests use get a placeholder: without the org's GitHub installation, runs don't get repository access.
+const placeholderRepo = (o: string, key: string) =>
+  db`update projects p set github_repo = 'octo/placeholder' from orgs where orgs.id = p.org_id and orgs.slug = ${o} and p.key = ${key}`;
+for (const key of ['WEB', 'API', 'MAR', 'WEB2']) await placeholderRepo(org, key);
 console.log('✓ default project keys: MAR, WEB2, DRE');
 
 // Two agents: one with a webhook, one that long-polls via MCP.
@@ -665,6 +670,38 @@ assert.equal(ghState.repos.length, 150, 'all pages of repositories');
 assert.ok(ghState.repos.includes('octo/pong') && ghState.repos.includes('octo/fresh'));
 await assert.rejects(api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/secret' }), /can’t access octo\/secret/);
 await api('PATCH', `/api/projects/${org}/WEB/github`, { repo: 'octo/pong' });
+// No repository: an agent's work waits on a task asking a person to connect one; connecting it starts the work.
+await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
+const needsRepo = await api('POST', `/api/projects/${org}/DRE/items`, { type: 'issue', title: 'Render the logo', status: 'Todo', assignee: house.agent.id });
+const needsRepo2 = await api('POST', `/api/projects/${org}/DRE/items`, { type: 'issue', title: 'Render the icon', status: 'Todo', assignee: house.agent.id });
+let setupTask: any;
+for (let i = 0; i < 100 && !setupTask; i++) {
+  await new Promise((res) => setTimeout(res, 100));
+  setupTask = (await api('GET', `/api/items/${needsRepo.ref}`)).tasks?.find((t: any) => /Connect a GitHub repository/.test(t.title));
+}
+assert.ok(setupTask, 'a setup task is created under the issue');
+const setupDetail = await api('GET', `/api/items/${setupTask.ref}`);
+assert.equal(setupDetail.item.assigneeId, (await api('GET', '/api/me')).id, 'assigned to the person who asked (an admin)');
+assert.match(setupDetail.item.body, new RegExp(`/app/${org}/DRE/settings\\?tab=repository`));
+const waitingOn = async () => {
+  for (let i = 0; i < 100; i++) {
+    const items = (await api('GET', `/api/projects/${org}/DRE`)).items;
+    const both = [needsRepo, needsRepo2].map((x) => items.find((i: any) => i.ref === x.ref).blockedBy ?? []);
+    if (both.every((b) => b.length)) return { items, both };
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  throw new Error('items never waited on the setup task');
+};
+const { items: dreItems, both } = await waitingOn();
+assert.equal(dreItems.filter((i: any) => /Connect a GitHub repository/.test(i.title)).length, 1, 'one setup task per project');
+assert.ok(both.every((b) => b.some((r: string) => setupTask.ref.endsWith(r))), 'both items wait on the setup task');
+assert.ok(!(await api('GET', `/api/agents/${house.agent.id}`)).runs.some((x: any) => x.itemRef === needsRepo.ref), 'no run without a repository');
+await api('POST', `/api/comments/${setupTask.ref}`, { body: 'on it' });
+assert.equal((await api('GET', `/api/items/${setupTask.ref}`)).item.done, false, 'a reply doesn’t close it; connecting does');
+await api('PATCH', `/api/projects/${org}/DRE/github`, { repo: 'octo/pong' });
+assert.equal((await api('GET', `/api/items/${setupTask.ref}`)).item.done, true, 'connecting the repository closes it');
+assert.equal((await runFor(needsRepo2.ref)).error, null, 'and the waiting work starts');
+console.log('✓ no repository: work waits on a task for a person to connect one, and starts when it is connected');
 // In-house developer: builds on a branch, opens a PR, merges it, publishes Pages, comments the URL.
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-dev', maxSteps: 20 } });
 tokenRequests = [];

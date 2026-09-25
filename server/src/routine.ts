@@ -3,7 +3,7 @@ import { sql } from './db.js';
 import { config } from './config.js';
 import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
-import { recordEvent, requeueAgent, workingColumn } from './domain.js';
+import { recordEvent, requeueAgent, requireRepository, workingColumn } from './domain.js';
 import { compactReference } from './apidoc.js';
 import { BROWSER_TOOL_NAMES, inHouseFull, REPO_TOOL_NAMES, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
 import { browserAvailable } from './browser.js';
@@ -48,6 +48,8 @@ export type Pending = {
   itemInBacklog: boolean;
   itemBlocked: boolean;
   itemClosed: boolean;
+  /** The item's project has no repository connected. */
+  itemNeedsRepo: boolean;
   runtimeProviderId: string | null;
   runtimeModel: string | null;
   runtimeMaxSteps: number;
@@ -382,7 +384,20 @@ export async function processRoutineQueue(rows: Pending[]) {
     // Waiting on an unfinished blocker: no runs. The last blocker finishing sends "unblocked", which starts one.
     const blocked = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && r.itemBlocked);
     if (blocked.length) await markRows(blocked.map((r) => r.id), 'skipped', 'blocked');
-    const ready = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && !blocked.includes(r));
+    const unblocked = agentRows.filter((r) => !stale.includes(r) && !closed.includes(r) && !parked.includes(r) && !blocked.includes(r));
+    // These agents work in the project's repository: without one, the item waits on a person connecting it.
+    const repoless = unblocked.filter((r) => r.itemNeedsRepo);
+    for (const itemId of new Set(repoless.filter((r) => !r.itemClosed).map((r) => r.itemId!))) {
+      const r = repoless.find((x) => x.itemId === itemId)!;
+      const agent = { id: agentId, kind: 'agent' as const, name: r.agentName, email: null, orgId: r.agentOrgId };
+      try {
+        await requireRepository(agent, itemId, { id: r.actorId, kind: r.actorKind });
+      } catch (e) {
+        console.error(`repository setup task for item ${itemId}:`, e);
+      }
+    }
+    if (repoless.length) await markRows(repoless.map((r) => r.id), 'skipped', 'waiting for a repository');
+    const ready = unblocked.filter((r) => !repoless.includes(r));
     // Changes another agent made mid-run wait for that run to end: it may still be linking or editing them.
     const makers = [...new Set(ready.filter((r) => r.actorKind === 'agent' && r.actorId !== agentId).map((r) => r.actorId))];
     const running = makers.length
