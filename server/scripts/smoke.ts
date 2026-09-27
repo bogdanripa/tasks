@@ -242,6 +242,19 @@ assert.equal(agentView.queue.items, 2);
 assert.equal(agentView.runs[0].sessionUrl, 'https://claude.ai/code/session_1');
 console.log('✓ updates queue while a run is active:', agentView.queue.updates, 'updates on', agentView.queue.items, 'items');
 
+// Org page: the same active run + queued count, in the one org query (no per-agent round trip).
+// r1 is a task, so its parent issue (opsRoot) comes along too.
+const orgOnR1 = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === rAgent.agent.id);
+assert.equal(orgOnR1.activeRun.id, agentView.runs[0].id);
+assert.equal(orgOnR1.activeRun.itemRef, r1.ref);
+assert.equal(orgOnR1.activeRun.itemTitle, 'Rotate logs');
+assert.equal(orgOnR1.activeRun.itemType, 'task');
+assert.equal(orgOnR1.activeRun.projectKey, 'WEB');
+assert.deepEqual(orgOnR1.activeRun.parent, { ref: opsRoot.ref, title: opsRoot.title });
+assert.ok(orgOnR1.activeRun.startedAt);
+assert.equal(orgOnR1.queuedUpdates, agentView.queue.updates, 'same count as the agent detail page’s queue.updates');
+console.log('✓ org page: active run on a task shows its parent issue and the agent’s queued-update count');
+
 // The run works through the API with its token, as the agent. Its own changes don't wake itself.
 const seen = await api('GET', `/api/items/${r1.ref}`, undefined, run1);
 assert.ok(seen.history.some((e: any) => e.type === 'agent.run_started' && e.data.sessionUrl));
@@ -322,6 +335,12 @@ assert.deepEqual(await api('POST', '/api/runs/end', {}, tokenOf(fires[6].text)),
 assert.deepEqual(await api('POST', '/api/runs/end', {}, tokenOf(fires[6].text)), { ended: false });
 const epic = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Harden the Pi', status: 'Todo', assignee: rAgent.agent.id });
 await waitFor(() => fires.length === 8, 'owner run for the new issue');
+// Org page: an active run on an issue (not a task) carries no parent.
+const orgOnEpic = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === rAgent.agent.id);
+assert.equal(orgOnEpic.activeRun.itemRef, epic.ref);
+assert.equal(orgOnEpic.activeRun.itemType, 'issue');
+assert.equal(orgOnEpic.activeRun.parent, null);
+console.log('✓ org page: active run on an issue has no parent');
 await api('POST', '/api/runs/end', {}, tokenOf(fires[7].text));
 const epicTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: epic.ref, title: 'Enable unattended upgrades', status: 'Todo', assignee: `alice-${run}@example.com` });
 await api('PATCH', `/api/items/${epicTask.ref}`, { status: 'Done' });
@@ -405,6 +424,11 @@ assert.equal((await api('GET', `/api/items/${gated.ref}`)).item.assigneeName, rA
 assert.ok((await api('GET', '/api/inbox?unread=1')).some((n: any) => n.reason === 'needs_reviewer' && n.itemRef === gated.ref));
 // An agent connected after work was assigned picks it up.
 const late = await api('POST', `/api/orgs/${org}/agents`, { name: `late-${run}` });
+// Org page: a brand-new agent with no runs and no notifications is idle — both fields null/0, nothing else on the row.
+const orgOnLate = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === late.agent.id);
+assert.equal(orgOnLate.activeRun, null);
+assert.equal(orgOnLate.queuedUpdates, 0);
+console.log('✓ org page: an idle agent shows no active run and no queued updates');
 const lateItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Waiting for its agent', status: 'Todo', assignee: late.agent.id });
 await new Promise((r) => setTimeout(r, 1500));
 const before = fires.length;
