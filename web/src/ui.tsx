@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, get, itemPath, type Event } from './api';
+import { ImageUploadBar, useImageUpload } from './images';
 
 /** Fetch JSON on mount / when `path` changes. `reload` refetches without clearing. */
 export function useFetch<T>(path: string | null) {
@@ -228,7 +229,11 @@ export function Markdown({ children }: { children: string }) {
     <div className="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" /> }}
+        components={{
+          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+          // Cap at the content column instead of native resolution (an uploaded image can be huge).
+          img: ({ node: _node, ...props }) => <img {...props} style={{ maxWidth: '100%', height: 'auto' }} loading="lazy" />,
+        }}
       >
         {children}
       </ReactMarkdown>
@@ -240,9 +245,11 @@ export function Markdown({ children }: { children: string }) {
  * Markdown that turns into an editor when clicked (or its placeholder is clicked). Links and text
  * selection don't trigger editing. Cmd/Ctrl+Enter saves, Esc cancels.
  */
-export function EditableMarkdown(props: { value: string; onSave: (value: string) => Promise<unknown>; placeholder: string; editPlaceholder?: string; readOnly?: boolean }) {
+export function EditableMarkdown(props: { value: string; onSave: (value: string) => Promise<unknown>; placeholder: string; editPlaceholder?: string; readOnly?: boolean; org?: string }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const images = useImageUpload(props.org, textareaRef, (fn) => setDraft((prev) => fn(prev ?? '')));
   const save = async () => {
     try {
       await props.onSave(draft ?? '');
@@ -256,7 +263,9 @@ export function EditableMarkdown(props: { value: string; onSave: (value: string)
     return (
       <div className="stack">
         <textarea
+          ref={textareaRef}
           autoFocus
+          className={images.dragActive ? 'drag-over' : undefined}
           rows={Math.min(Math.max(draft.split('\n').length + 2, 8), 30)}
           value={draft}
           placeholder={props.editPlaceholder ?? 'Markdown is supported.'}
@@ -265,12 +274,14 @@ export function EditableMarkdown(props: { value: string; onSave: (value: string)
             if (e.key === 'Escape') setDraft(null);
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
           }}
+          {...images.textareaProps}
         />
         <ErrorNote error={error} />
         <div className="actions">
           <span className="muted small grow">Markdown supported · ⌘/Ctrl+Enter to save · Esc to cancel</span>
+          {props.org && <ImageUploadBar upload={images} />}
           <button className="ghost small" onClick={() => setDraft(null)}>Cancel</button>
-          <button className="primary small" onClick={save}>Save</button>
+          <button className="primary small" onClick={save} disabled={images.uploading}>Save</button>
         </div>
       </div>
     );
