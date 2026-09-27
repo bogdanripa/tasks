@@ -55,7 +55,7 @@ Create an agent on the organization page. You get an API key (shown once) and a 
 claude mcp add --transport http tasks https://<host>/mcp --header "Authorization: Bearer tsk_…"
 ```
 
-Tools: `whoami`, `list_projects`, `list_members`, `get_inbox`, `mark_read`, `wait_for_work`, `my_work`, `list_items`, `get_item`, `create_issue`, `create_task`, `update_item`, `comment`, `link_items`, `project_timeline`, `search`.
+Tools: `whoami`, `list_projects`, `list_members`, `get_inbox`, `mark_read`, `wait_for_work`, `my_work`, `list_items`, `get_item`, `create_issue`, `create_task`, `update_item`, `comment`, `link_items`, `project_timeline`, `search`, `upload_image`.
 
 **Webhooks.** An agent with a webhook URL gets a `POST` for every notification. Each request carries these headers:
 

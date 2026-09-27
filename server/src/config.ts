@@ -43,5 +43,11 @@ export const config = {
     maxNudges: 2,
   },
   secretsKey: process.env.SECRETS_KEY ?? (process.env.NODE_ENV === 'production' ? '' : 'dev-only-insecure-secrets-key'),
+  // Images pasted/uploaded into descriptions and comments (TAS-2). No env var: the limit is a product
+  // decision, not a deployment one, and mirrored client-side so a rejection is immediate.
+  images: {
+    maxBytes: 8 * 1024 * 1024,
+    allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const,
+  },
 };
 if (!config.secretsKey) throw new Error('SECRETS_KEY is required in production');

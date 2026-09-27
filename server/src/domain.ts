@@ -1311,3 +1311,27 @@ export async function markRead(actor: Actor, ids: number[] | 'all') {
   if (ids === 'all') await sql`update notifications set read_at = now() where account_id = ${actor.id} and read_at is null`;
   else if (ids.length) await sql`update notifications set read_at = now() where account_id = ${actor.id} and id in ${sql(ids)} and read_at is null`;
 }
+
+// ---------- images ----------
+
+/** Uploaded via a paste/drop/file-pick (web) or {data, mimeType} (API/MCP); referenced only by URL from Markdown. */
+export async function uploadImage(actor: Actor, orgSlug: string, data: Buffer, mimeType: string) {
+  if (!config.images.allowedMimeTypes.includes(mimeType as (typeof config.images.allowedMimeTypes)[number]))
+    throw badRequest(`Unsupported image type "${mimeType}" (allowed: ${config.images.allowedMimeTypes.join(', ')})`);
+  if (data.length === 0) throw badRequest('Empty file');
+  if (data.length > config.images.maxBytes) throw badRequest(`Image exceeds the ${config.images.maxBytes}-byte limit`);
+  const org = await resolveOrg(actor, orgSlug);
+  const [row] = await sql`
+    insert into images (org_id, uploaded_by, mime_type, byte_size, data)
+    values (${org.id}, ${actor.id}, ${mimeType}, ${data.length}, ${data})
+    returning id`;
+  return { id: row.id as string, url: `${config.publicUrl}/api/images/${row.id}` };
+}
+
+/** Unknown id and no-access both throw notFound: a caller must not be able to tell them apart. */
+export async function fetchImage(actor: Actor, id: string) {
+  if (!UUID.test(id)) throw notFound('Image');
+  const [row] = await sql`select org_id, mime_type, data from images where id = ${id}`;
+  if (!row || !(await orgRole(actor.id, row.orgId))) throw notFound('Image');
+  return row as { orgId: string; mimeType: string; data: Buffer };
+}

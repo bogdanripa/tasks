@@ -15,6 +15,8 @@ export type Doc = {
   wildcard?: string;
   /** Included in the compact reference that routine runs get. */
   agent?: boolean;
+  /** Raises Fastify's default 1MB request size cap for this route only (e.g. base64 image uploads). */
+  bodyLimit?: number;
 };
 
 type Registered = { method: string; url: string; doc?: Doc };
@@ -55,7 +57,8 @@ export function route<D extends Doc>(
   app.route<{ Params: Record<string, string> }>({
     method,
     url,
-    config: { doc },
+    bodyLimit: doc.bodyLimit,
+    config: { doc } as Record<string, unknown>,
     handler: (req, reply) =>
       handler(req, { body: doc.body?.parse(req.body ?? {}), query: doc.query?.parse(req.query ?? {}) } as Input<D>, reply),
   });

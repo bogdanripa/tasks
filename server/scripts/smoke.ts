@@ -1255,6 +1255,51 @@ assert.doesNotMatch(help, /\(undocumented\)/, 'every /api route has docs');
 assert.match(help, /PATCH \/api\/items\/\{ref\}\n.*\n.*\n  body:\n(.*\n)*?    status\?: string/);
 console.log('✓ /api/help generated from routes:', help.split('\n').filter((l) => /^(GET|POST|PATCH|DELETE) /.test(l)).length, 'endpoints; payload', fires[0].text.length, 'chars');
 
+// ---- Images: upload (JSON base64 + multipart + MCP) and serve, scoped to org membership (TAS-2) ----
+assert.match(help, /POST \/api\/orgs\/\{org\}\/images/);
+assert.match(help, /GET \/api\/images\/\{id\}/);
+const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const uploaded = await api('POST', `/api/orgs/${org}/images`, { data: png1x1.toString('base64'), mimeType: 'image/png' });
+assert.match(uploaded.url, new RegExp(`/api/images/${uploaded.id}$`));
+const served = await fetch(uploaded.url, { headers: { cookie } });
+assert.equal(served.status, 200);
+assert.equal(served.headers.get('content-type'), 'image/png');
+assert.equal(served.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+assert.ok(Buffer.from(await served.arrayBuffer()).equals(png1x1), 'served bytes match what was uploaded');
+
+// The browser's path: multipart/form-data with one file field.
+const form = new FormData();
+form.append('file', new Blob([png1x1], { type: 'image/png' }), 'pixel.png');
+const multipartRes = await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie }, body: form });
+assert.equal(multipartRes.status, 201);
+const multipartImg = await multipartRes.json();
+assert.notEqual(multipartImg.id, uploaded.id);
+assert.equal((await fetch(multipartImg.url, { headers: { cookie } })).status, 200);
+
+// The MCP tool calls the same domain function as the REST route.
+const mcpUpload = await mcp(poller.key.key, 'upload_image', { org, data: png1x1.toString('base64'), mime_type: 'image/png' });
+assert.match(mcpUpload.url, /\/api\/images\//);
+assert.equal((await fetch(mcpUpload.url, { headers: { cookie } })).status, 200);
+
+// Rejections: wrong type, too large — a 400, nothing stored.
+await assert.rejects(api('POST', `/api/orgs/${org}/images`, { data: Buffer.from('hi').toString('base64'), mimeType: 'text/plain' }), /Unsupported image type/);
+const tooBig = Buffer.alloc(8 * 1024 * 1024 + 1);
+await assert.rejects(api('POST', `/api/orgs/${org}/images`, { data: tooBig.toString('base64'), mimeType: 'image/png' }), /exceeds/);
+const bigForm = new FormData();
+bigForm.append('file', new Blob([tooBig], { type: 'image/png' }), 'big.png');
+const bigMultipartRes = await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie }, body: bigForm });
+assert.equal(bigMultipartRes.status, 400);
+
+// Access: no enumeration oracle — unknown id, not signed in, and signed in but not a member all read the same.
+assert.equal((await fetch(`${BASE}/api/images/00000000-0000-0000-0000-000000000000`, { headers: { cookie } })).status, 404);
+assert.equal((await fetch(uploaded.url)).status, 401);
+assert.equal((await fetch(uploaded.url, { headers: { cookie: bobCookie } })).status, 404, 'bob left this org; same 404 as unknown');
+assert.equal(
+  (await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie: bobCookie, 'content-type': 'application/json' }, body: JSON.stringify({ data: png1x1.toString('base64'), mimeType: 'image/png' }) })).status,
+  404,
+);
+console.log('✓ images: JSON + multipart + MCP upload, served with immutable caching, size/type limits, no enumeration oracle');
+
 // Starter setup: a new org gets a PM, Dev and QA; its projects are set up for them.
 const starter = `start-${run}`;
 await api('POST', '/api/orgs', { slug: starter, name: 'Starter' });

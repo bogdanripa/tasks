@@ -152,6 +152,13 @@ function buildServer(actor: Actor) {
     d.search(actor, query),
   );
 
+  tool(
+    'upload_image',
+    'Upload an image and get back {id, url}; put the url in a body you pass to create_issue, create_task, update_item or comment as ![](url) to embed it.',
+    { org: z.string(), data: z.string().describe('base64-encoded image bytes'), mime_type: z.string().describe('image/png, image/jpeg, image/gif or image/webp') },
+    ({ org, data, mime_type }) => d.uploadImage(actor, org, Buffer.from(data, 'base64'), mime_type),
+  );
+
   return server;
 }
 
