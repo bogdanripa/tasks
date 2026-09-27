@@ -34,6 +34,10 @@ export function useImageUpload(org: string | undefined, textareaRef: RefObject<H
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Where the *next* insertion in the current batch should land. The DOM caret move after an
+  // insert is deferred to rAF, which is too late for the next file in a multi-upload batch to
+  // read via el.selectionStart — so this is updated synchronously inside insertAt instead.
+  const nextInsertPos = useRef<number | null>(null);
 
   const insertAt = (markdown: string, start: number, end: number) => {
     update((prev) => {
@@ -41,10 +45,11 @@ export function useImageUpload(org: string | undefined, textareaRef: RefObject<H
       const e = Math.min(end, prev.length);
       return prev.slice(0, s) + markdown + prev.slice(e);
     });
+    const pos = start + markdown.length;
+    nextInsertPos.current = pos;
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
-      const pos = start + markdown.length;
       el.focus();
       el.setSelectionRange(pos, pos);
     });
@@ -54,8 +59,8 @@ export function useImageUpload(org: string | undefined, textareaRef: RefObject<H
     const reason = rejectionReason(file);
     if (reason) { setError(reason); return; }
     const el = textareaRef.current;
-    const start = el?.selectionStart ?? el?.value.length ?? 0;
-    const end = el?.selectionEnd ?? start;
+    const start = nextInsertPos.current ?? el?.selectionStart ?? el?.value.length ?? 0;
+    const end = nextInsertPos.current !== null ? start : (el?.selectionEnd ?? start);
     setError(null);
     setCount((n) => n + 1);
     try {
@@ -71,7 +76,9 @@ export function useImageUpload(org: string | undefined, textareaRef: RefObject<H
 
   // Sequential: each insertion's cursor math is computed against the text left by the one before it.
   const uploadFiles = async (files: File[]) => {
+    nextInsertPos.current = null;
     for (const file of files) await upload(file);
+    nextInsertPos.current = null;
   };
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -94,7 +101,9 @@ export function useImageUpload(org: string | undefined, textareaRef: RefObject<H
   const onDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
     setDragActive(false);
     if (!org) return;
-    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
+    // Don't pre-filter by type: a dropped non-image file is a rejection case (surfaced by
+    // upload()'s own check), not something to silently swallow.
+    const files = Array.from(e.dataTransfer?.files ?? []);
     if (!files.length) return;
     e.preventDefault();
     uploadFiles(files);
