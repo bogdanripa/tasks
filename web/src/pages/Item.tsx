@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, itemPath, type Event } from '../api';
 import { useSession } from '../App';
+import { ImageUploadBar, useImageUpload } from '../images';
 import { Avatar, EditableMarkdown, ErrorNote, EventRow, KindBadge, Markdown, Modal, SkillChip, RefLink, Time, TypeBadge, linkVerb, useFetch, Working } from '../ui';
 
 export default function ItemPage() {
@@ -83,6 +84,7 @@ export default function ItemPage() {
               placeholder="Add a description…"
               editPlaceholder="Describe the need or the work. Markdown is supported."
               onSave={(body) => patch({ body })}
+              org={org}
             />
           </section>
 
@@ -168,7 +170,7 @@ export default function ItemPage() {
                 </li>
               ))}
             </ul>
-            <CommentBox fullRef={fullRef} onPosted={reload} />
+            <CommentBox fullRef={fullRef} org={org!} onPosted={reload} />
           </section>
         </div>
 
@@ -304,15 +306,17 @@ function MemberOptions({ members }: { members: any[] }) {
   );
 }
 
-function CommentBox({ fullRef, onPosted }: { fullRef: string; onPosted: () => void }) {
+function CommentBox({ fullRef, org, onPosted }: { fullRef: string; org: string; onPosted: () => void }) {
   const [body, setBody] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const images = useImageUpload(org, textareaRef, (fn) => setBody(fn));
   return (
     <form
       className="stack comment-box"
       onSubmit={async (e) => {
         e.preventDefault();
-        if (!body.trim()) return;
+        if (!body.trim() || images.uploading) return;
         try {
           await api('POST', `/api/comments/${fullRef}`, { body });
           setBody('');
@@ -323,10 +327,19 @@ function CommentBox({ fullRef, onPosted }: { fullRef: string; onPosted: () => vo
         }
       }}
     >
-      <textarea rows={3} placeholder="Write a comment…" value={body} onChange={(e) => setBody(e.target.value)} />
+      <textarea
+        ref={textareaRef}
+        rows={3}
+        className={images.dragActive ? 'drag-over' : undefined}
+        placeholder="Write a comment…"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        {...images.textareaProps}
+      />
       <ErrorNote error={error} />
       <div className="actions">
-        <button className="primary small" disabled={!body.trim()}>Comment</button>
+        <ImageUploadBar upload={images} />
+        <button className="primary small" disabled={!body.trim() || images.uploading}>Comment</button>
       </div>
     </form>
   );
