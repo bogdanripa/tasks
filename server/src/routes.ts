@@ -580,6 +580,51 @@ export function apiRoutes(app: FastifyInstance) {
     return d.search(await requireActor(req), q);
   });
 
+  // ---- images (pasted/uploaded into descriptions and comments) ----
+  route(app, 'POST', '/api/orgs/:org/images', {
+    section: 'Images',
+    summary: 'upload an image (multipart file field, or JSON {data: base64, mimeType}); returns {id, url} to embed as ![](url)',
+    body: z.object({
+      data: z.string().optional().describe('base64-encoded bytes; omit when sending multipart/form-data instead'),
+      mimeType: z.string().optional().describe('image/png, image/jpeg, image/gif or image/webp; omit when sending multipart/form-data instead'),
+    }),
+    // Fastify's default 1MB request cap is well under an 8MB image (~10.9MB base64'd); domain.uploadImage
+    // still enforces the real limit and returns 400, so this is only about not truncating a valid upload first.
+    bodyLimit: Math.ceil((config.images.maxBytes * 4) / 3) + 16_384,
+    agent: true,
+  }, async (req, { body }, reply) => {
+    const actor = await requireActor(req);
+    let data: Buffer;
+    let mimeType: string;
+    if (req.isMultipart()) {
+      const file = await req.file();
+      if (!file) throw badRequest('No file field in multipart body');
+      mimeType = file.mimetype;
+      try {
+        data = await file.toBuffer();
+      } catch (e) {
+        if ((e as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') throw badRequest(`Image exceeds the ${config.images.maxBytes}-byte limit`);
+        throw e;
+      }
+    } else {
+      if (!body.data || !body.mimeType) throw badRequest('Provide multipart/form-data, or JSON {data, mimeType}');
+      data = Buffer.from(body.data, 'base64');
+      mimeType = body.mimeType;
+    }
+    const img = await d.uploadImage(actor, req.params.org, data, mimeType);
+    reply.code(201);
+    return img;
+  });
+  route(app, 'GET', '/api/images/:id', {
+    section: 'Images',
+    summary: 'fetch an image’s bytes (immutable; requires auth + org membership; unknown id and no access both answer 404)',
+  }, async (req, _input, reply) => {
+    const actor = await requireActor(req);
+    const img = await d.fetchImage(actor, req.params.id);
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    return reply.type(img.mimeType).send(img.data);
+  });
+
   route(app, 'GET', '/api/templates/agent-pipeline', { section: 'Reference', summary: 'the agent pipeline project guidelines template (Markdown)' }, async (_req, _input, reply) =>
     reply.type('text/markdown; charset=utf-8').send(PIPELINE_TEMPLATE),
   );
