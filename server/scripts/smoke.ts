@@ -1281,6 +1281,14 @@ const mcpUpload = await mcp(poller.key.key, 'upload_image', { org, data: png1x1.
 assert.match(mcpUpload.url, /\/api\/images\//);
 assert.equal((await fetch(mcpUpload.url, { headers: { cookie } })).status, 200);
 
+// TAS-14: /mcp had no bodyLimit override, so it fell back to Fastify's default 1MB cap — a base64 image
+// comfortably under the domain's 8MB limit (a normal screenshot) failed at the HTTP layer before
+// upload_image's domain code ever ran. 2MB is over that old 1MB default and under the 8MB cap.
+const midSize = Buffer.alloc(2 * 1024 * 1024, 7);
+const mcpMidUpload = await mcp(poller.key.key, 'upload_image', { org, data: midSize.toString('base64'), mime_type: 'image/png' });
+assert.match(mcpMidUpload.url, /\/api\/images\//);
+assert.equal((await fetch(mcpMidUpload.url, { headers: { cookie } })).status, 200);
+
 // Rejections: wrong type, too large — a 400, nothing stored.
 await assert.rejects(api('POST', `/api/orgs/${org}/images`, { data: Buffer.from('hi').toString('base64'), mimeType: 'text/plain' }), /Unsupported image type/);
 const tooBig = Buffer.alloc(8 * 1024 * 1024 + 1);
@@ -1290,6 +1298,12 @@ bigForm.append('file', new Blob([tooBig], { type: 'image/png' }), 'big.png');
 const bigMultipartRes = await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie }, body: bigForm });
 assert.equal(bigMultipartRes.status, 400);
 
+// TAS-14: the JSON route's bodyLimit only had ~16KB of slack past the exact 8MB cap, so a realistically
+// oversized upload (a user's photo a few hundred KB over, not just 1 byte) tripped Fastify's own blunt
+// body-size cutoff instead of reaching domain.uploadImage's clean 400. This is ~500KB over the cap.
+const realisticallyOversized = Buffer.alloc(8 * 1024 * 1024 + 512 * 1024);
+await assert.rejects(api('POST', `/api/orgs/${org}/images`, { data: realisticallyOversized.toString('base64'), mimeType: 'image/png' }), /exceeds/);
+
 // Access: no enumeration oracle — unknown id, not signed in, and signed in but not a member all read the same.
 assert.equal((await fetch(`${BASE}/api/images/00000000-0000-0000-0000-000000000000`, { headers: { cookie } })).status, 404);
 assert.equal((await fetch(uploaded.url)).status, 401);
@@ -1298,7 +1312,7 @@ assert.equal(
   (await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie: bobCookie, 'content-type': 'application/json' }, body: JSON.stringify({ data: png1x1.toString('base64'), mimeType: 'image/png' }) })).status,
   404,
 );
-console.log('✓ images: JSON + multipart + MCP upload, served with immutable caching, size/type limits, no enumeration oracle');
+console.log('✓ images: JSON + multipart + MCP upload, served with immutable caching, size/type limits, no enumeration oracle, oversized-but-realistic uploads get a clean 400');
 
 // Starter setup: a new org gets a PM, Dev and QA; its projects are set up for them.
 const starter = `start-${run}`;

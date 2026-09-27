@@ -590,7 +590,7 @@ export function apiRoutes(app: FastifyInstance) {
     }),
     // Fastify's default 1MB request cap is well under an 8MB image (~10.9MB base64'd); domain.uploadImage
     // still enforces the real limit and returns 400, so this is only about not truncating a valid upload first.
-    bodyLimit: Math.ceil((config.images.maxBytes * 4) / 3) + 16_384,
+    bodyLimit: config.images.maxRequestBytes,
     agent: true,
   }, async (req, { body }, reply) => {
     const actor = await requireActor(req);
