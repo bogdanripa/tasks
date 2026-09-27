@@ -4,6 +4,8 @@ function env(name: string, fallback?: string): string {
   return v;
 }
 
+const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
 export const config = {
   port: Number(env('PORT', '3000')),
   databaseUrl: env('DATABASE_URL', 'postgres://tasks:tasks@localhost:5434/tasks'),
@@ -46,8 +48,16 @@ export const config = {
   // Images pasted/uploaded into descriptions and comments (TAS-2). No env var: the limit is a product
   // decision, not a deployment one, and mirrored client-side so a rejection is immediate.
   images: {
-    maxBytes: 8 * 1024 * 1024,
+    maxBytes: IMAGE_MAX_BYTES,
     allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const,
+    // Fastify's own request-body cutoff for a base64 image upload — shared by the images route's JSON
+    // path and the MCP upload_image tool (both send the same base64-in-JSON shape). domain.uploadImage
+    // enforces the real maxBytes limit after decoding, with a clean 400; this only needs to comfortably
+    // clear a realistically-oversized upload (a user's photo that's a few MB over the cap) so it reaches
+    // that check instead of tripping Fastify's blunt cutoff, which — mid-upload, behind a proxy — surfaces
+    // as a bare 502 instead of a readable error. 2x the base64'd max size leaves ample room for that
+    // while still bounding worst-case body size.
+    maxRequestBytes: Math.ceil((IMAGE_MAX_BYTES * 4) / 3) * 2,
   },
 };
 if (!config.secretsKey) throw new Error('SECRETS_KEY is required in production');

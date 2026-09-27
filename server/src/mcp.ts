@@ -164,7 +164,10 @@ function buildServer(actor: Actor) {
 
 export function mcpRoutes(app: FastifyInstance) {
   // Stateless Streamable HTTP: a fresh server per request, identity from the Bearer API key.
-  app.post('/mcp', async (req, reply) => {
+  // Without an override this falls back to Fastify's default 1MB cap, which upload_image's base64
+  // payload (up to ~10.9MB for an 8MB image) blows through before domain.uploadImage ever runs —
+  // matching the images route's own limit keeps the two upload paths consistent.
+  app.post('/mcp', { bodyLimit: config.images.maxRequestBytes }, async (req, reply) => {
     const actor = await authenticate(req);
     if (!actor) {
       reply.header('www-authenticate', `Bearer realm="${config.publicUrl}"`);
