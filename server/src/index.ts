@@ -1,6 +1,7 @@
 import { startWatchdog } from './watchdog.js';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
 import fstatic from '@fastify/static';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +19,8 @@ import { drainInHouse, recoverInterruptedRuns } from './runtime.js';
 
 const app = Fastify({ logger: { level: config.production ? 'info' : 'warn' }, trustProxy: true });
 await app.register(cookie);
+// One file field, for the browser's image upload; the MCP tool and other API callers send base64 JSON instead.
+await app.register(multipart, { limits: { fileSize: config.images.maxBytes, files: 1 } });
 // Keep the raw JSON text too: GitHub webhook signatures are computed over it.
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
   (req as { rawBody?: string }).rawBody = body as string;

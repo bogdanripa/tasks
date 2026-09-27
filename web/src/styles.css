@@ -100,8 +100,11 @@ textarea { resize: vertical; }
 label { display: flex; flex-direction: column; gap: 4px; font-weight: 500; font-size: 13px; }
 .hint { font-weight: 400; color: var(--muted); font-size: 12px; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
-.actions { display: flex; justify-content: flex-end; gap: 8px; }
+.actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; }
 .row-gap { display: flex; gap: 6px; flex-wrap: wrap; }
+.image-upload { display: flex; align-items: center; gap: 8px; }
+.image-upload .error { margin: 0; }
+textarea.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
 /* top bar */
 .topbar {
@@ -270,7 +273,7 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
 .markdown th { background: var(--surface-2); }
 .markdown hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
-.markdown img { max-width: 100%; }
+.markdown img { max-width: 100%; height: auto; }
 
 .item-side { display: flex; flex-direction: column; gap: 14px; }
 .item-side h2 { margin-top: 10px; }
@@ -353,6 +356,7 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 }
 .not-connected .warn-icon:hover + .tip, .not-connected .warn-icon:focus + .tip { display: block; }
 .people li { flex-wrap: wrap; }
+.agent-activity { flex-basis: 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .warn-icon { width: 18px; height: 18px; border-radius: 50%; background: var(--issue); color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center; flex: none; }
 .not-connected + .skills, .not-connected + .skills-edit { margin-left: 0; }
 .connect { background: color-mix(in srgb, var(--agent) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--agent) 30%, var(--border)); border-radius: 12px; padding: 16px 18px; }

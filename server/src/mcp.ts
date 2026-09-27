@@ -152,12 +152,22 @@ function buildServer(actor: Actor) {
     d.search(actor, query),
   );
 
+  tool(
+    'upload_image',
+    'Upload an image and get back {id, url}; put the url in a body you pass to create_issue, create_task, update_item or comment as ![](url) to embed it.',
+    { org: z.string(), data: z.string().describe('base64-encoded image bytes'), mime_type: z.string().describe('image/png, image/jpeg, image/gif or image/webp') },
+    ({ org, data, mime_type }) => d.uploadImage(actor, org, Buffer.from(data, 'base64'), mime_type),
+  );
+
   return server;
 }
 
 export function mcpRoutes(app: FastifyInstance) {
   // Stateless Streamable HTTP: a fresh server per request, identity from the Bearer API key.
-  app.post('/mcp', async (req, reply) => {
+  // Without an override this falls back to Fastify's default 1MB cap, which upload_image's base64
+  // payload (up to ~10.9MB for an 8MB image) blows through before domain.uploadImage ever runs —
+  // matching the images route's own limit keeps the two upload paths consistent.
+  app.post('/mcp', { bodyLimit: config.images.maxRequestBytes }, async (req, reply) => {
     const actor = await authenticate(req);
     if (!actor) {
       reply.header('www-authenticate', `Bearer realm="${config.publicUrl}"`);

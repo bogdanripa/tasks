@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../App';
-import { Avatar, ErrorNote, KindBadge, Modal, SkillChip, useFetch } from '../ui';
+import { Avatar, ErrorNote, KindBadge, Modal, RefLink, SkillChip, Time, Working, useFetch } from '../ui';
 
 export default function OrgPage() {
   const { org } = useParams();
@@ -11,11 +11,18 @@ export default function OrgPage() {
   const navigate = useNavigate();
   const [newProject, setNewProject] = useState(false);
 
+  // Agent activity (active run, queued updates) changes while agents work.
+  useEffect(() => {
+    const t = setInterval(() => document.visibilityState === 'visible' && reload(), 10_000);
+    return () => clearInterval(t);
+  }, [reload]);
+
   if (error) return <div className="page"><ErrorNote error={error} /></div>;
   if (!data) return <div className="page muted">Loading…</div>;
   const admin = data.org.role !== 'member';
   const humans = data.members.filter((m: any) => m.kind === 'human');
   const agents = data.members.filter((m: any) => m.kind === 'agent');
+  const projectName = (key: string) => data.projects.find((p: any) => p.key === key)?.name ?? key;
   const leave = async () => {
     if (!confirm(`Leave ${data.org.name}? Your open items here will be unassigned.`)) return;
     try {
@@ -75,7 +82,21 @@ export default function OrgPage() {
                 {admin ? <Link to={`/agents/${m.id}`}>{m.name}</Link> : <span>{m.name}</span>}
                 <KindBadge kind="agent" />
                 {m.skills?.map((sk: string) => <SkillChip key={sk} skill={sk} />)}
+                {m.queuedUpdates > 0 && <span className="pill">{m.queuedUpdates} queued</span>}
                 {!m.connected && <NotConnected agent={m} admin={admin} />}
+                {m.activeRun && (
+                  <div className="agent-activity">
+                    <Working run={m.activeRun.id} />
+                    <span>
+                      on <RefLink refStr={m.activeRun.itemRef} /> {m.activeRun.itemTitle}
+                      {m.activeRun.parent && (
+                        <> · for issue <RefLink refStr={m.activeRun.parent.ref} /> {m.activeRun.parent.title}</>
+                      )}
+                      {' · '}{projectName(m.activeRun.projectKey)}
+                      {' · '}started <Time iso={m.activeRun.startedAt} />
+                    </span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

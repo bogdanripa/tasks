@@ -325,7 +325,7 @@ export async function createOrg(actor: Actor, input: { slug: string; name: strin
 
 export async function orgDetail(actor: Actor, slug: string) {
   const org = await resolveOrg(actor, slug);
-  const [projects, members, invites] = await Promise.all([
+  const [projects, rawMembers, invites] = await Promise.all([
     sql`
       select p.id, p.key, p.name, p.description,
              count(i.*) filter (where i.closed_at is null)::int as open_items
@@ -338,11 +338,48 @@ export async function orgDetail(actor: Actor, slug: string) {
              a.description,
              (a.runtime_provider_id is not null or a.routine_url is not null or a.webhook_url is not null
                or exists (select 1 from api_keys k where k.account_id = a.id and k.revoked_at is null and k.last_used_at is not null)) as connected,
-             case when ${org.role !== 'member'} then a.webhook_url end as webhook_url
+             case when ${org.role !== 'member'} then a.webhook_url end as webhook_url,
+             run.id as active_run_id, run.created_at as active_run_started_at,
+             run.item_ref, run.item_title, run.item_type, run.project_key,
+             run.parent_ref, run.parent_title,
+             coalesce(q.updates, 0) as queued_updates
       from memberships m join accounts a on a.id = m.account_id
+      -- The one active run for this agent, if any (same "fired, not finished" rule as workingSql/workingRunSql,
+      -- keyed on agent_id instead of item_id). limit 1 is belt-and-suspenders: the one-run-at-a-time rule
+      -- means there's normally at most one row anyway.
+      left join lateral (
+        select r.id, r.created_at, v.ref as item_ref, v.title as item_title, v.type as item_type,
+               v.project_key, par.ref as parent_ref, par.title as parent_title
+        from agent_runs r
+        join item_view v on v.id = r.item_id
+        left join item_view par on par.id = v.parent_id
+        where r.agent_id = a.id and r.status = 'fired' and r.finished_at is null
+        order by r.created_at desc limit 1
+      ) run on true
+      -- Identical to the agent detail page's queue.updates filter (routes.ts, GET /api/agents/:id) so the two
+      -- counts can never drift apart: a blocked notification is flipped to 'skipped' before it ever reaches
+      -- 'pending', so there's no separate "not blocked" test to repeat here.
+      left join lateral (
+        select count(*)::int as updates
+        from notifications n left join item_view iv on iv.id = n.item_id
+        where n.account_id = a.id and n.delivery_status = 'pending' and coalesce(lower(iv.status), '') <> 'backlog'
+      ) q on true
       where m.org_id = ${org.id} order by a.kind desc, a.name`,
     org.role === 'member' ? [] : sql`select email, role, created_at from invites where org_id = ${org.id} order by created_at`,
   ]);
+  // Runs unconditionally for every member; a human account has no agent_runs/relevant notifications rows, so
+  // both lateral subqueries return null/0 for them and activeRun/queuedUpdates are simply unused on those rows.
+  const members = rawMembers.map((m: Row) => {
+    const { activeRunId, activeRunStartedAt, itemRef, itemTitle, itemType, projectKey, parentRef, parentTitle, queuedUpdates, ...rest } = m;
+    return {
+      ...rest,
+      activeRun: activeRunId
+        ? { id: activeRunId, itemRef, itemTitle, itemType, projectKey, startedAt: activeRunStartedAt,
+            parent: parentRef ? { ref: parentRef, title: parentTitle } : null }
+        : null,
+      queuedUpdates,
+    };
+  });
   const skills = [...new Set([...SUGGESTED_SKILLS, ...members.flatMap((m: Row) => m.skills)])].sort();
   return { org, projects, members, invites, skills, agentReady: await agentReady(sql, org.id) };
 }
@@ -1273,4 +1310,28 @@ export async function inbox(actor: Actor, opts: { unreadOnly?: boolean; afterId?
 export async function markRead(actor: Actor, ids: number[] | 'all') {
   if (ids === 'all') await sql`update notifications set read_at = now() where account_id = ${actor.id} and read_at is null`;
   else if (ids.length) await sql`update notifications set read_at = now() where account_id = ${actor.id} and id in ${sql(ids)} and read_at is null`;
+}
+
+// ---------- images ----------
+
+/** Uploaded via a paste/drop/file-pick (web) or {data, mimeType} (API/MCP); referenced only by URL from Markdown. */
+export async function uploadImage(actor: Actor, orgSlug: string, data: Buffer, mimeType: string) {
+  if (!config.images.allowedMimeTypes.includes(mimeType as (typeof config.images.allowedMimeTypes)[number]))
+    throw badRequest(`Unsupported image type "${mimeType}" (allowed: ${config.images.allowedMimeTypes.join(', ')})`);
+  if (data.length === 0) throw badRequest('Empty file');
+  if (data.length > config.images.maxBytes) throw badRequest(`Image exceeds the ${config.images.maxBytes}-byte limit`);
+  const org = await resolveOrg(actor, orgSlug);
+  const [row] = await sql`
+    insert into images (org_id, uploaded_by, mime_type, byte_size, data)
+    values (${org.id}, ${actor.id}, ${mimeType}, ${data.length}, ${data})
+    returning id`;
+  return { id: row.id as string, url: `${config.publicUrl}/api/images/${row.id}` };
+}
+
+/** Unknown id and no-access both throw notFound: a caller must not be able to tell them apart. */
+export async function fetchImage(actor: Actor, id: string) {
+  if (!UUID.test(id)) throw notFound('Image');
+  const [row] = await sql`select org_id, mime_type, data from images where id = ${id}`;
+  if (!row || !(await orgRole(actor.id, row.orgId))) throw notFound('Image');
+  return row as { orgId: string; mimeType: string; data: Buffer };
 }

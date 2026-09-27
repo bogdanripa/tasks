@@ -242,6 +242,19 @@ assert.equal(agentView.queue.items, 2);
 assert.equal(agentView.runs[0].sessionUrl, 'https://claude.ai/code/session_1');
 console.log('✓ updates queue while a run is active:', agentView.queue.updates, 'updates on', agentView.queue.items, 'items');
 
+// Org page: the same active run + queued count, in the one org query (no per-agent round trip).
+// r1 is a task, so its parent issue (opsRoot) comes along too.
+const orgOnR1 = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === rAgent.agent.id);
+assert.equal(orgOnR1.activeRun.id, agentView.runs[0].id);
+assert.equal(orgOnR1.activeRun.itemRef, r1.ref);
+assert.equal(orgOnR1.activeRun.itemTitle, 'Rotate logs');
+assert.equal(orgOnR1.activeRun.itemType, 'task');
+assert.equal(orgOnR1.activeRun.projectKey, 'WEB');
+assert.deepEqual(orgOnR1.activeRun.parent, { ref: opsRoot.ref, title: opsRoot.title });
+assert.ok(orgOnR1.activeRun.startedAt);
+assert.equal(orgOnR1.queuedUpdates, agentView.queue.updates, 'same count as the agent detail page’s queue.updates');
+console.log('✓ org page: active run on a task shows its parent issue and the agent’s queued-update count');
+
 // The run works through the API with its token, as the agent. Its own changes don't wake itself.
 const seen = await api('GET', `/api/items/${r1.ref}`, undefined, run1);
 assert.ok(seen.history.some((e: any) => e.type === 'agent.run_started' && e.data.sessionUrl));
@@ -322,6 +335,12 @@ assert.deepEqual(await api('POST', '/api/runs/end', {}, tokenOf(fires[6].text)),
 assert.deepEqual(await api('POST', '/api/runs/end', {}, tokenOf(fires[6].text)), { ended: false });
 const epic = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Harden the Pi', status: 'Todo', assignee: rAgent.agent.id });
 await waitFor(() => fires.length === 8, 'owner run for the new issue');
+// Org page: an active run on an issue (not a task) carries no parent.
+const orgOnEpic = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === rAgent.agent.id);
+assert.equal(orgOnEpic.activeRun.itemRef, epic.ref);
+assert.equal(orgOnEpic.activeRun.itemType, 'issue');
+assert.equal(orgOnEpic.activeRun.parent, null);
+console.log('✓ org page: active run on an issue has no parent');
 await api('POST', '/api/runs/end', {}, tokenOf(fires[7].text));
 const epicTask = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'task', parent: epic.ref, title: 'Enable unattended upgrades', status: 'Todo', assignee: `alice-${run}@example.com` });
 await api('PATCH', `/api/items/${epicTask.ref}`, { status: 'Done' });
@@ -405,6 +424,11 @@ assert.equal((await api('GET', `/api/items/${gated.ref}`)).item.assigneeName, rA
 assert.ok((await api('GET', '/api/inbox?unread=1')).some((n: any) => n.reason === 'needs_reviewer' && n.itemRef === gated.ref));
 // An agent connected after work was assigned picks it up.
 const late = await api('POST', `/api/orgs/${org}/agents`, { name: `late-${run}` });
+// Org page: a brand-new agent with no runs and no notifications is idle — both fields null/0, nothing else on the row.
+const orgOnLate = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === late.agent.id);
+assert.equal(orgOnLate.activeRun, null);
+assert.equal(orgOnLate.queuedUpdates, 0);
+console.log('✓ org page: an idle agent shows no active run and no queued updates');
 const lateItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Waiting for its agent', status: 'Todo', assignee: late.agent.id });
 await new Promise((r) => setTimeout(r, 1500));
 const before = fires.length;
@@ -1230,6 +1254,65 @@ const help = await (await fetch(`${BASE}/api/help`)).text();
 assert.doesNotMatch(help, /\(undocumented\)/, 'every /api route has docs');
 assert.match(help, /PATCH \/api\/items\/\{ref\}\n.*\n.*\n  body:\n(.*\n)*?    status\?: string/);
 console.log('✓ /api/help generated from routes:', help.split('\n').filter((l) => /^(GET|POST|PATCH|DELETE) /.test(l)).length, 'endpoints; payload', fires[0].text.length, 'chars');
+
+// ---- Images: upload (JSON base64 + multipart + MCP) and serve, scoped to org membership (TAS-2) ----
+assert.match(help, /POST \/api\/orgs\/\{org\}\/images/);
+assert.match(help, /GET \/api\/images\/\{id\}/);
+const png1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const uploaded = await api('POST', `/api/orgs/${org}/images`, { data: png1x1.toString('base64'), mimeType: 'image/png' });
+assert.match(uploaded.url, new RegExp(`/api/images/${uploaded.id}$`));
+const served = await fetch(uploaded.url, { headers: { cookie } });
+assert.equal(served.status, 200);
+assert.equal(served.headers.get('content-type'), 'image/png');
+assert.equal(served.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+assert.ok(Buffer.from(await served.arrayBuffer()).equals(png1x1), 'served bytes match what was uploaded');
+
+// The browser's path: multipart/form-data with one file field.
+const form = new FormData();
+form.append('file', new Blob([png1x1], { type: 'image/png' }), 'pixel.png');
+const multipartRes = await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie }, body: form });
+assert.equal(multipartRes.status, 201);
+const multipartImg = await multipartRes.json();
+assert.notEqual(multipartImg.id, uploaded.id);
+assert.equal((await fetch(multipartImg.url, { headers: { cookie } })).status, 200);
+
+// The MCP tool calls the same domain function as the REST route.
+const mcpUpload = await mcp(poller.key.key, 'upload_image', { org, data: png1x1.toString('base64'), mime_type: 'image/png' });
+assert.match(mcpUpload.url, /\/api\/images\//);
+assert.equal((await fetch(mcpUpload.url, { headers: { cookie } })).status, 200);
+
+// TAS-14: /mcp had no bodyLimit override, so it fell back to Fastify's default 1MB cap — a base64 image
+// comfortably under the domain's 8MB limit (a normal screenshot) failed at the HTTP layer before
+// upload_image's domain code ever ran. 2MB is over that old 1MB default and under the 8MB cap.
+const midSize = Buffer.alloc(2 * 1024 * 1024, 7);
+const mcpMidUpload = await mcp(poller.key.key, 'upload_image', { org, data: midSize.toString('base64'), mime_type: 'image/png' });
+assert.match(mcpMidUpload.url, /\/api\/images\//);
+assert.equal((await fetch(mcpMidUpload.url, { headers: { cookie } })).status, 200);
+
+// Rejections: wrong type, too large — a 400, nothing stored.
+await assert.rejects(api('POST', `/api/orgs/${org}/images`, { data: Buffer.from('hi').toString('base64'), mimeType: 'text/plain' }), /Unsupported image type/);
+const tooBig = Buffer.alloc(8 * 1024 * 1024 + 1);
+await assert.rejects(api('POST', `/api/orgs/${org}/images`, { data: tooBig.toString('base64'), mimeType: 'image/png' }), /exceeds/);
+const bigForm = new FormData();
+bigForm.append('file', new Blob([tooBig], { type: 'image/png' }), 'big.png');
+const bigMultipartRes = await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie }, body: bigForm });
+assert.equal(bigMultipartRes.status, 400);
+
+// TAS-14: the JSON route's bodyLimit only had ~16KB of slack past the exact 8MB cap, so a realistically
+// oversized upload (a user's photo a few hundred KB over, not just 1 byte) tripped Fastify's own blunt
+// body-size cutoff instead of reaching domain.uploadImage's clean 400. This is ~500KB over the cap.
+const realisticallyOversized = Buffer.alloc(8 * 1024 * 1024 + 512 * 1024);
+await assert.rejects(api('POST', `/api/orgs/${org}/images`, { data: realisticallyOversized.toString('base64'), mimeType: 'image/png' }), /exceeds/);
+
+// Access: no enumeration oracle — unknown id, not signed in, and signed in but not a member all read the same.
+assert.equal((await fetch(`${BASE}/api/images/00000000-0000-0000-0000-000000000000`, { headers: { cookie } })).status, 404);
+assert.equal((await fetch(uploaded.url)).status, 401);
+assert.equal((await fetch(uploaded.url, { headers: { cookie: bobCookie } })).status, 404, 'bob left this org; same 404 as unknown');
+assert.equal(
+  (await fetch(`${BASE}/api/orgs/${org}/images`, { method: 'POST', headers: { cookie: bobCookie, 'content-type': 'application/json' }, body: JSON.stringify({ data: png1x1.toString('base64'), mimeType: 'image/png' }) })).status,
+  404,
+);
+console.log('✓ images: JSON + multipart + MCP upload, served with immutable caching, size/type limits, no enumeration oracle, oversized-but-realistic uploads get a clean 400');
 
 // Starter setup: a new org gets a PM, Dev and QA; its projects are set up for them.
 const starter = `start-${run}`;

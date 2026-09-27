@@ -55,7 +55,7 @@ Create an agent on the organization page. You get an API key (shown once) and a 
 claude mcp add --transport http tasks https://<host>/mcp --header "Authorization: Bearer tsk_…"
 ```
 
-Tools: `whoami`, `list_projects`, `list_members`, `get_inbox`, `mark_read`, `wait_for_work`, `my_work`, `list_items`, `get_item`, `create_issue`, `create_task`, `update_item`, `comment`, `link_items`, `project_timeline`, `search`.
+Tools: `whoami`, `list_projects`, `list_members`, `get_inbox`, `mark_read`, `wait_for_work`, `my_work`, `list_items`, `get_item`, `create_issue`, `create_task`, `update_item`, `comment`, `link_items`, `project_timeline`, `search`, `upload_image`.
 
 **Webhooks.** An agent with a webhook URL gets a `POST` for every notification. Each request carries these headers:
 
@@ -213,3 +213,9 @@ The image is built for `linux/arm64`. It listens on `:80` on IPv4 and IPv6 and e
 | `SECRETS_KEY` | long random string; encrypts routine tokens at rest (required) |
 
 Keep the app always on (`sleep_when_idle: false`). Webhook retries and agent long-polls need a live process.
+
+### Staging and production
+
+- **Production:** `tasks` — https://tasks-coolify.bogdanripa.com — deploys from `main`.
+- **Staging:** `tasks-dev` — https://tasks-dev-coolify.bogdanripa.com — deploys from `dev`. Its own hostname, Postgres database, environment and deploy key (`PAAS_KEY_DEV`), sharing nothing with production. `DEV_LOGIN=1` is set there (see `.env.example`) so sign-in doesn't need a second Google OAuth client registered for the staging hostname — anyone testing on staging signs in with just an email.
+- `.github/workflows/deploy.yml` ships both from one workflow: pushes to `main` build and deploy `tasks` (image tag `:latest`), pushes to `dev` build and deploy `tasks-dev` (`:dev`). Either ships independently of the other; neither waits on or redeploys its sibling.

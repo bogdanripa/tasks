@@ -1,12 +1,15 @@
 name: deploy
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
 
-# Every run pushes the same :latest tag and the box deploys whatever that
-# points at, so two overlapping runs race and the one that FINISHES last
-# wins regardless of which commit is newer — a quick follow-up commit can
-# land first and then be undone by its predecessor. Build times still vary
+# Every run pushes the same moving tag for its branch — :latest on
+# main, :dev on dev — and the box deploys whatever that points at, so
+# two overlapping runs on ONE branch race and the one that FINISHES
+# last wins regardless of which commit is newer: a quick follow-up
+# commit can land first and then be undone by its predecessor. The two
+# branches never race each other, because they move different tags.
+# Build times still vary
 # with image size, so don't build a polling timeout around a guess; time
 # your own first run and use that. One run at a time, newest wins.
 concurrency:
@@ -38,8 +41,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: tag
-        run: echo "value=sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+      # main -> tasks (:latest), dev -> tasks-dev (:dev). The two share a
+      # repository and a Dockerfile and nothing else: separate hostname,
+      # database, environment, schedule and release cadence.
+      #
+      # The tags MUST differ. Both apps auto-update from their moving tag, so a
+      # dev build pushed to :latest would be deployed to production by the
+      # box's hourly sweep — with nothing to notice, because a deploy that
+      # succeeds looks the same whichever commit it carries.
+      - name: Pick the target app
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            app=tasks-dev; moving=dev;    commit=dev-${GITHUB_SHA::7}
+          else
+            app=tasks; moving=latest; commit=sha-${GITHUB_SHA::7}
+          fi
+          echo "app=$app"       >> $GITHUB_OUTPUT
+          echo "moving=$moving" >> $GITHUB_OUTPUT
+          echo "commit=$commit" >> $GITHUB_OUTPUT
+          echo "branch ${{ github.ref_name }} -> app $app, tags :$moving and :$commit"
 
       - uses: docker/build-push-action@v6
         with:
@@ -59,18 +80,18 @@ jobs:
           build-args: |
             GIT_SHA=${{ github.sha }}
           tags: |
-            ghcr.io/bogdanripa/tasks:latest
-            ghcr.io/bogdanripa/tasks:${{ steps.tag.outputs.value }}
+            ghcr.io/bogdanripa/tasks:${{ steps.target.outputs.moving }}
+            ghcr.io/bogdanripa/tasks:${{ steps.target.outputs.commit }}
 
       # Tells the box what this build pushed. On the app's FIRST deploy
       # that image is what creates its container — the app was registered
       # as a bare id, because only this pipeline knows what it runs. After
       # that the box watches the tag itself and this just asks it to check
-      # now rather than at the next hourly sweep. Authenticated with this
-      # app's scoped deploy key (PAAS_KEY), which can only deploy this one
-      # app. The control plane redeploys itself often and answers 404
-      # while it restarts, so transient codes are retried rather than
-      # believed.
+      # now rather than at the next hourly sweep. Authenticated with the
+      # TARGET app's scoped deploy key — PAAS_KEY on main, PAAS_KEY_DEV on
+      # dev — each of which can only deploy its own app. The control plane
+      # redeploys itself often and answers 404 while it restarts, so
+      # transient codes are retried rather than believed.
       #
       # 202 means QUEUED, not deployed. The hook used to hold the
       # connection open until it had verified the deploy, but Cloudflare
@@ -83,17 +104,17 @@ jobs:
         run: |
           for i in $(seq 1 10); do
             code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer ${{ secrets.PAAS_KEY }}" \
+              -H "Authorization: Bearer ${{ github.ref_name == 'dev' && secrets.PAAS_KEY_DEV || secrets.PAAS_KEY }}" \
               -H "Content-Type: application/json" \
-              -d '{"image": "ghcr.io/bogdanripa/tasks:latest"}' \
-              "https://api-coolify.bogdanripa.com/apps/tasks/refresh" || echo 000)
+              -d '{"image": "ghcr.io/bogdanripa/tasks:${{ steps.target.outputs.moving }}", "commit": "${{ github.sha }}"}' \
+              "https://api-coolify.bogdanripa.com/apps/${{ steps.target.outputs.app }}/refresh" || echo 000)
             case "$code" in
               2*) cat /tmp/out; echo
                   python3 -c "import json;print('id='+json.load(open('/tmp/out')).get('deploy',''))" \
                     >> $GITHUB_OUTPUT
                   exit 0 ;;
               404|000|503|504) echo "attempt $i: $code, retrying"; sleep 10 ;;
-              401) echo "PAAS_KEY is not this app's deploy key"; exit 1 ;;
+              401) echo "the key is not ${{ steps.target.outputs.app }}'s - on dev that secret is PAAS_KEY_DEV, on main PAAS_KEY"; exit 1 ;;
               *)  cat /tmp/out; echo; echo "refresh failed ($code)"; exit 1 ;;
             esac
           done
@@ -113,16 +134,16 @@ jobs:
       # check below have the last word.
       - name: Wait for the deploy to be verified
         run: |
-          url="https://api-coolify.bogdanripa.com/apps/tasks/refresh?deploy=${{ steps.refresh.outputs.id }}"
+          url="https://api-coolify.bogdanripa.com/apps/${{ steps.target.outputs.app }}/refresh?deploy=${{ steps.refresh.outputs.id }}"
           for i in $(seq 1 60); do
-            body=$(curl -sS -H "Authorization: Bearer ${{ secrets.PAAS_KEY }}" "$url" || echo '{}')
+            body=$(curl -sS -H "Authorization: Bearer ${{ github.ref_name == 'dev' && secrets.PAAS_KEY_DEV || secrets.PAAS_KEY }}" "$url" || echo '{}')
             state=$(printf '%s' "$body" | python3 -c "import json,sys;print(json.load(sys.stdin).get('state',''))" 2>/dev/null || echo)
             case "$state" in
               succeeded) echo "deploy verified on the box"; exit 0 ;;
               failed) printf '%s\n' "$body"
                       echo "the new container never came up healthy, so Coolify rolled"
                       echo "the deploy back — the PREVIOUS version is still serving and"
-                      echo "will answer the health check below. check: apps_logs tasks"
+                      echo "will answer the health check below. check: apps_logs ${{ steps.target.outputs.app }}"
                       exit 1 ;;
               running|"") sleep 5 ;;
               unknown) printf '%s\n' "$body"
@@ -146,7 +167,7 @@ jobs:
       # step tests something.
       - name: Wait for the new version to be healthy
         run: |
-          url="https://tasks-coolify.bogdanripa.com/healthz"
+          url="https://${{ steps.target.outputs.app }}-coolify.bogdanripa.com/healthz"
           for i in $(seq 1 40); do
             code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || echo 000)
             case "$code" in
@@ -175,13 +196,15 @@ jobs:
             esac
           done
           echo "no 2xx from $url — either the app did not come up"
-          echo "(check: apps_logs tasks) or the app does not serve"
+          echo "(check: apps_logs ${{ steps.target.outputs.app }}) or the app does not serve"
           echo "/healthz; fix the route or change health_path"
           exit 1
 
   # The public site (/, /docs/) and the app's static files (/app/) as a static bundle, served by the
   # shared static host behind the CDN. Anything not in the bundle (/api, /auth, /mcp, /app/* deep
-  # links) falls through to the container. From apps_deploy_workflow's optional frontend job.
+  # links) falls through to the container. Adapted from apps_deploy_workflow's optional frontend job
+  # to this repo's layout (build via the `web` workspace, output in `web/dist`), with the same
+  # branch -> app/key selection as the deploy job above.
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -197,10 +220,11 @@ jobs:
       - name: Package the bundle
         run: cd web/dist && zip -qr "$GITHUB_WORKSPACE/site.zip" .
 
-      # PAAS_KEY is this app's scoped deploy key.
+      # PAAS_KEY is tasks's scoped deploy key, PAAS_KEY_DEV is tasks-dev's — same
+      # branch selection as the deploy job.
       - name: Upload the frontend
         run: |
           curl -fsS -X PUT \
-            -H "Authorization: Bearer ${{ secrets.PAAS_KEY }}" \
+            -H "Authorization: Bearer ${{ github.ref_name == 'dev' && secrets.PAAS_KEY_DEV || secrets.PAAS_KEY }}" \
             --data-binary @site.zip \
-            "https://api-coolify.bogdanripa.com/apps/tasks/frontend"
+            "https://api-coolify.bogdanripa.com/apps/${{ github.ref_name == 'dev' && 'tasks-dev' || 'tasks' }}/frontend?commit=${{ github.sha }}"
