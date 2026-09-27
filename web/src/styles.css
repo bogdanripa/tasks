@@ -353,6 +353,7 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 }
 .not-connected .warn-icon:hover + .tip, .not-connected .warn-icon:focus + .tip { display: block; }
 .people li { flex-wrap: wrap; }
+.agent-activity { flex-basis: 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .warn-icon { width: 18px; height: 18px; border-radius: 50%; background: var(--issue); color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center; flex: none; }
 .not-connected + .skills, .not-connected + .skills-edit { margin-left: 0; }
 .connect { background: color-mix(in srgb, var(--agent) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--agent) 30%, var(--border)); border-radius: 12px; padding: 16px 18px; }
