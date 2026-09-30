@@ -342,7 +342,8 @@ export async function orgDetail(actor: Actor, slug: string) {
              run.id as active_run_id, run.created_at as active_run_started_at,
              run.item_ref, run.item_title, run.item_type, run.project_key,
              run.parent_ref, run.parent_title,
-             coalesce(q.updates, 0) as queued_updates
+             coalesce(q.updates, 0) as queued_updates,
+             case when a.kind = 'human' then coalesce(w.assigned, '{"total":0,"items":[]}'::jsonb) end as assigned
       from memberships m join accounts a on a.id = m.account_id
       -- The one active run for this agent, if any (same "fired, not finished" rule as workingSql/workingRunSql,
       -- keyed on agent_id instead of item_id). limit 1 is belt-and-suspenders: the one-run-at-a-time rule
@@ -364,6 +365,26 @@ export async function orgDetail(actor: Actor, slug: string) {
         from notifications n left join item_view iv on iv.id = n.item_id
         where n.account_id = a.id and n.delivery_status = 'pending' and coalesce(lower(iv.status), '') <> 'backlog'
       ) q on true
+      -- Open work held by a human: total count plus the 5 most recently updated. Scoped to this org, whose
+      -- projects the viewer can all see (access is org membership), so nothing extra is exposed. Same "open"
+      -- rule as elsewhere (closed_at is null). One aggregate per human keeps the response bounded.
+      left join lateral (
+        select jsonb_build_object(
+          'total', count(*)::int,
+          'items', coalesce(jsonb_agg(jsonb_build_object(
+            'ref', t.ref, 'title', t.title, 'type', t.type, 'projectKey', t.project_key, 'projectName', t.project_name,
+            'parentRef', t.parent_ref, 'parentTitle', t.parent_title, 'updatedAt', t.updated_at
+          ) order by t.updated_at desc) filter (where t.rn <= 5), '[]'::jsonb)) as assigned
+        from (
+          select v.ref, v.title, v.type, v.project_key, p.name as project_name, v.updated_at,
+                 par.ref as parent_ref, par.title as parent_title,
+                 row_number() over (order by v.updated_at desc, v.number desc) as rn
+          from item_view v
+          join projects p on p.id = v.project_id
+          left join item_view par on par.id = v.parent_id
+          where v.org_id = ${org.id} and v.assignee_id = a.id and v.closed_at is null
+        ) t
+      ) w on a.kind = 'human'
       where m.org_id = ${org.id} order by a.kind desc, a.name`,
     org.role === 'member' ? [] : sql`select email, role, created_at from invites where org_id = ${org.id} order by created_at`,
   ]);
