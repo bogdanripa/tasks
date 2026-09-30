@@ -322,7 +322,10 @@ export function Tabs<T extends string>({ tabs, labels, current, onSelect }: { ta
 }
 
 export function SkillChip({ skill, missing }: { skill: string; missing?: boolean }) {
-  return <span className={`skill ${missing ? 'missing' : ''}`}>{missing ? `needs ${skill}` : skill}</span>;
+  const title = missing
+    ? `Needs the ${skill} skill — will be assigned to the least busy member with it`
+    : `Skill: ${skill}`;
+  return <span className={`skill ${missing ? 'missing' : ''}`} title={title}>{missing ? `needs ${skill}` : skill}</span>;
 }
 
 /** Comma-separated skills editor with suggestions; saves on Enter/blur-less Save. */
@@ -381,7 +384,7 @@ export function StartsSoon({ at, itemRef, agent, onStarted }: { at: string; item
   const left = Math.ceil((new Date(at).getTime() - now) / 1000);
   if (left <= 0 || asked) {
     const text = asked ? 'starting…' : 'queued';
-    const title = asked ? 'Starting now' : 'Waiting for the agent to finish its current work';
+    const title = asked ? 'Starting now — the agent is being started on this.' : 'Queued — the agent is finishing other work and will start on this next.';
     return <span className="starting" title={title} aria-label={title}><ClockIcon />{text}</span>;
   }
   const label = left >= 60 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left}s`;
@@ -412,9 +415,9 @@ export function StartsSoon({ at, itemRef, agent, onStarted }: { at: string; item
 
 /** "working", linking to the run's live transcript when we know it. Doesn't trigger the card's own click. */
 export function Working({ run, label = 'working' }: { run?: string | null; label?: string }) {
-  if (!run) return <span className="working" title="An agent is working on this right now">{label}</span>;
+  if (!run) return <span className="working" title="An agent is working on this right now.">{label}</span>;
   return (
-    <Link to={`/runs/${run}`} className="working as-link" title="Watch what the agent is doing" onClick={(e) => e.stopPropagation()}>
+    <Link to={`/runs/${run}`} className="working as-link" title="An agent is working on this right now. Click to watch." aria-label="An agent is working on this right now. Click to watch." onClick={(e) => e.stopPropagation()}>
       {label}
     </Link>
   );

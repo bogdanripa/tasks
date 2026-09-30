@@ -57,7 +57,7 @@ export function renderSummary(all: Row[], token: string) {
   }
   if (more > 0) {
     text.push(`…and ${more} more — see ${config.publicUrl}/app/`, '');
-    html.push(`<p>…and ${more} more — <a href="${esc(config.publicUrl)}/app/">see them in Tasks</a></p>`);
+    html.push(`<p>…and ${more} more — <a href="${esc(config.publicUrl)}/app/">see them in Mustered</a></p>`);
   }
   text.push('--', `Unsubscribe from this daily summary: ${unsub}`, `Settings: ${settings}`);
   html.push(`<hr><p style="font:13px system-ui,sans-serif;color:#666"><a href="${esc(unsub)}">Unsubscribe</a> from this daily summary · <a href="${esc(settings)}">Settings</a></p>`);
