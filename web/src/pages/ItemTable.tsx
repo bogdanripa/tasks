@@ -87,8 +87,8 @@ export function ItemTable({ items, columns, flat }: { items: Row[]; columns: str
                 {!nested && i.parentRef && <span className="muted small"> · {i.parentRef.split('/')[1]}</span>}
                 {i.working && <> <Working run={i.workingRun} /></>}
                 {!i.working && i.startsAt && !i.blockedBy?.length && !i.done && <> <StartsSoon at={i.startsAt} itemRef={i.ref} agent={i.assigneeName} /></>}
-                {!i.done && !!i.blockedBy?.length && <span className="pill" title={`Waiting on ${i.blockedBy.join(', ')}`}> ⏸ blocked</span>}
-                {!!i.tasksTotal && <span className="muted small"> ☑ {i.tasksDone}/{i.tasksTotal}</span>}
+                {!i.done && !!i.blockedBy?.length && <span className="pill" title={`Blocked — waiting on ${i.blockedBy.join(', ')} to finish`}> ⏸ blocked</span>}
+                {!!i.tasksTotal && <span className="muted small" title={`${i.tasksDone} of ${i.tasksTotal} tasks done`}> ☑ {i.tasksDone}/{i.tasksTotal}</span>}
               </td>
               <td><span className="status-chip">{i.status}</span></td>
               <td>
