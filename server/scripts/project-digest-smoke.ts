@@ -133,5 +133,74 @@ const mb = to(big.email)[0];
 assert.ok(mb && /and 9 more/.test(mb.text), `cap footer, got: ${mb?.text.slice(-400)}`);
 assert.equal((mb.text.match(/^- /gm) ?? []).length, PER_PROJECT_CAP);
 
+// ---- Preferences API, unsubscribe scope semantics (TAS-43), through the real routes ----
+const { default: Fastify } = await import('fastify');
+const { default: cookie } = await import('@fastify/cookie');
+const { emailRoutes } = await import('../src/emailPrefs.js');
+const { sha256 } = await import('../src/auth.js');
+const api = Fastify();
+await api.register(cookie);
+emailRoutes(api);
+const login = async (id: string) => {
+  const tok = `t-${id}`;
+  await sql`insert into sessions (token_hash, account_id, expires_at) values (${sha256(tok)}, ${id}, now() + interval '1 day') on conflict do nothing`;
+  return { tasks_session: tok };
+};
+const call = async (id: string, method: 'GET' | 'PUT', url: string, payload?: object) =>
+  api.inject({ method, url, cookies: await login(id), payload });
+
+const pref = await acct('human', 'pref', 'Europe/Bucharest');
+await member(oa.id, pref.id, 'admin');
+let r = await call(pref.id, 'GET', '/api/me/email');
+let dg = r.json().topics.projectDigest;
+assert.equal(dg.enabled, false, 'digest is opt-in');
+assert.deepEqual(dg.projects.map((p: any) => p.key).sort(), ['AAA', 'AAB'], 'only owned projects listed (not beta)');
+assert.ok(dg.projects.every((p: any) => !p.enabled));
+// Per-project toggle: 400 while master is off, 403 for a project not owned.
+r = await call(pref.id, 'PUT', `/api/me/email/projects/${pa.id}`, { enabled: false });
+assert.equal(r.statusCode, 400, 'master off');
+await call(pref.id, 'PUT', '/api/me/email', { projectDigest: true });
+r = await call(pref.id, 'PUT', `/api/me/email/projects/${pb.id}`, { enabled: false });
+assert.equal(r.statusCode, 403, 'not owned');
+r = await call(pref.id, 'PUT', `/api/me/email/projects/${pa.id}`, { enabled: false });
+dg = r.json().topics.projectDigest;
+assert.equal(dg.enabled, true);
+assert.deepEqual(dg.projects.map((p: any) => [p.key, p.enabled]).sort(), [['AAA', false], ['AAB', true]]);
+// Master on clears per-project opt-outs.
+await call(pref.id, 'PUT', '/api/me/email', { projectDigest: false });
+await call(pref.id, 'PUT', '/api/me/email', { projectDigest: true });
+dg = (await call(pref.id, 'GET', '/api/me/email')).json().topics.projectDigest;
+assert.ok(dg.projects.every((p: any) => p.enabled), 'master-on clears opt-outs');
+// Agents have no email preferences.
+r = await api.inject({ method: 'GET', url: '/api/me/email' });
+assert.equal(r.statusCode, 401);
+
+// Unsubscribe pages per scope.
+const page = (method: 'GET' | 'POST', path: string, scope: string) =>
+  api.inject({ method, url: `/api/email/${path}?t=${encodeURIComponent(unsubscribeToken(pref.id, 'project_digest', scope))}` });
+r = await page('GET', 'unsubscribe', pa.id);
+assert.equal(r.statusCode, 200);
+assert.match(r.body, /unsubscribed from AAA proj\./);
+dg = (await call(pref.id, 'GET', '/api/me/email')).json().topics.projectDigest;
+assert.deepEqual(dg.projects.map((p: any) => [p.key, p.enabled]).sort(), [['AAA', false], ['AAB', true]], 'only that project off');
+r = await page('GET', 'unsubscribe', '');
+assert.match(r.body, /unsubscribed from all project summaries/);
+assert.equal((await call(pref.id, 'GET', '/api/me/email')).json().topics.projectDigest.enabled, false);
+r = await page('GET', 'unsubscribe', '00000000-0000-0000-0000-000000000000');
+assert.equal(r.statusCode, 200, 'unknown project: generic page');
+assert.match(r.body, /this project summary/);
+// Re-subscribe one project while master is off: master on, other owned projects explicitly off.
+r = await page('POST', 'resubscribe', pa2.id);
+assert.equal(r.statusCode, 200);
+dg = (await call(pref.id, 'GET', '/api/me/email')).json().topics.projectDigest;
+assert.equal(dg.enabled, true);
+assert.deepEqual(dg.projects.map((p: any) => [p.key, p.enabled]).sort(), [['AAA', false], ['AAB', true]], 'one click never subscribes to more');
+// Re-subscribe all: everything on again.
+await page('POST', 'resubscribe', '');
+dg = (await call(pref.id, 'GET', '/api/me/email')).json().topics.projectDigest;
+assert.ok(dg.enabled && dg.projects.every((p: any) => p.enabled));
+await api.close();
+console.log('✓ digest preferences API and unsubscribe/resubscribe scope semantics');
+
 console.log('✓ project digest (opt-in, roles, zones, windows, retry, unsubscribe, cap)');
 await sql.end();
