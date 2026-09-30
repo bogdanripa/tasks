@@ -17,6 +17,7 @@ export default function Settings() {
           <span className="muted">{me.email}</span>
         </div>
       </div>
+      {me.kind === 'human' && <EmailSection />}
       <AlertsSection />
       <section>
         <div className="section-head">
@@ -121,6 +122,58 @@ function AlertsSection() {
           <div><button className="primary" disabled={busy}>{busy ? 'Sending a test…' : 'Send a test and turn on'}</button></div>
         </form>
       )}
+    </section>
+  );
+}
+
+/** The daily assigned-items summary: on/off and the time zone its 07:00 is measured in. */
+function EmailSection() {
+  const { refreshMe } = useSession();
+  const { data, reload } = useFetch<{ timezone: string | null; topics: { assignedSummary: boolean } }>('/api/me/email');
+  const [tz, setTz] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const zones: string[] = (Intl as any).supportedValuesOf?.('timeZone') ?? [];
+  const shown = tz ?? data?.timezone ?? '';
+  const save = async (body: { timezone?: string; assignedSummary?: boolean }) => {
+    setError(null);
+    try {
+      await api('PUT', '/api/me/email', body, { toast: 'Saved' });
+      setTz(null);
+      reload();
+      refreshMe();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <section>
+      <h2>Email</h2>
+      <label className="row-gap" style={{ alignItems: 'center' }}>
+        <input
+          type="checkbox"
+          checked={data?.topics.assignedSummary ?? false}
+          disabled={!data}
+          onChange={(e) => save({ assignedSummary: e.target.checked })}
+        />
+        <span>Daily summary of my open assigned items</span>
+      </label>
+      <p className="muted small">Sent at 07:00 in your time zone, only when you have open items. Every email also has an unsubscribe link.</p>
+      <form
+        className="row-gap"
+        style={{ alignItems: 'end' }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (shown) save({ timezone: shown });
+        }}
+      >
+        <label>
+          Time zone
+          <input list="tz-list" value={shown} onChange={(e) => setTz(e.target.value)} placeholder="e.g. Europe/Bucharest" />
+          <datalist id="tz-list">{zones.map((z) => <option key={z} value={z} />)}</datalist>
+        </label>
+        <button className="small" disabled={!shown || shown === data?.timezone}>Save</button>
+      </form>
+      {error && <p className="error-text small">{error}</p>}
     </section>
   );
 }

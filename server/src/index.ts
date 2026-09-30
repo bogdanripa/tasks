@@ -16,6 +16,7 @@ import { startDeliveryWorker } from './delivery.js';
 import { collectRoutes } from './apidoc.js';
 import { startMailScheduler } from './mailScheduler.js';
 import './assignedSummary.js'; // registers the daily assigned-items summary job
+import { registerProjectDigest } from './projectDigest.js';
 import { startScheduler } from './schedules.js';
 import { drainInHouse, recoverInterruptedRuns } from './runtime.js';
 
@@ -71,6 +72,7 @@ await migrate();
 await recoverInterruptedRuns(); // in-house runs cut short by the last restart are queued again
 startDeliveryWorker();
 startScheduler();
+registerProjectDigest();
 startMailScheduler();
 startWatchdog();
 // '::' is dual-stack in Node: a container healthcheck may use ::1 while a proxy uses IPv4.
