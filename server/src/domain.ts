@@ -540,7 +540,7 @@ export async function createAgent(actor: Actor, slug: string, input: { name: str
 }
 
 /**
- * Add the starter team (PM, Lead, Dev, QA) to an existing org, skipping names already taken. With a runtime, Tasks
+ * Add the starter team (PM, Lead, Dev, QA) to an existing org, skipping names already taken. With a runtime, Mustered
  * runs them itself on that provider and model (the developer gets a higher step limit: every file is a step).
  */
 export async function addStarterTeam(actor: Actor, slug: string, runtime?: { providerId: string; model: string } | null) {
@@ -609,7 +609,7 @@ export async function updateAgent(
     if (!patch.runtime.model.trim()) throw badRequest('Choose a model');
     if (!canUseTools(patch.runtime.model.trim())) throw badRequest(`${patch.runtime.model} can’t call tools, so it can’t work as an agent. Choose a chat model.`);
   }
-  // One way to get work at a time: running in Tasks replaces a routine or webhook, and the other way round.
+  // One way to get work at a time: running in Mustered replaces a routine or webhook, and the other way round.
   if (patch.runtime) Object.assign(patch, { routineUrl: patch.routineUrl ?? null, webhookUrl: patch.webhookUrl ?? null });
   const clearRuntime = patch.runtime === null || (patch.runtime === undefined && (!!patch.routineUrl || !!patch.webhookUrl));
   const webhook = patch.webhookUrl === undefined ? undefined : checkWebhook(patch.webhookUrl);
@@ -992,7 +992,7 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
   if (actor.kind === 'agent' && item.type === 'issue' && patch.status === doneColumn(project) && item.status !== patch.status) {
     const open = await sql`select ref from item_view where parent_id = ${item.id} and closed_at is null order by number`;
     if (open.length) {
-      throw badRequest(`${item.ref} still has open tasks (${open.map((o) => o.ref).join(', ')}). Close the issue after they’re done: Tasks tells you when the last one is, for the definition-of-done check.`);
+      throw badRequest(`${item.ref} still has open tasks (${open.map((o) => o.ref).join(', ')}). Close the issue after they’re done: Mustered tells you when the last one is, for the definition-of-done check.`);
     }
   }
 
@@ -1196,7 +1196,7 @@ export async function projectOwner(projectId: string, orgId: string): Promise<st
 }
 
 /**
- * Agents that Tasks runs or starts work in the project's repository, so a project needs one before they start.
+ * Agents that Mustered runs or starts work in the project's repository, so a project needs one before they start.
  * Until it has one, the agent's item waits on a task asking a person to connect it (an admin: whoever asked
  * for the work if they can, else the project's creator or an owner). One such task per project at a time;
  * connecting the repository closes it, which starts the waiting work.
@@ -1228,7 +1228,7 @@ export async function requireRepository(agent: Actor, itemId: string, askedBy: {
         `Connect one in the project's settings: ${settings}`,
         '(If GitHub isn\'t set up for the organization yet, install the GitHub App first in the organization\'s Settings → GitHub.)',
         '',
-        'Tasks closes this task when the repository is connected, and the waiting work starts.',
+        'Mustered closes this task when the repository is connected, and the waiting work starts.',
       ].join('\n'),
       assignee: human,
       status: project.columns.find((c: string) => c.toLowerCase() !== 'backlog') ?? project.columns[0],

@@ -6,11 +6,11 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { config } from './config.js';
 
 /**
- * A headless browser for agents that Tasks runs, so QA and product checks can use what they test. One
+ * A headless browser for agents that Mustered runs, so QA and product checks can use what they test. One
  * Chromium process, one isolated context per run (closed when the run ends), a few sessions at a time.
  *
  * All browser traffic goes through a small proxy in this process that resolves each host itself and refuses
- * private, loopback and link-local addresses, so an agent can't reach Tasks' own network. The browser only
+ * private, loopback and link-local addresses, so an agent can't reach Mustered's own network. The browser only
  * sees the public internet; staging sites must be public (restrict them at the hosting level if needed).
  */
 
@@ -112,7 +112,7 @@ let waiting: (() => void)[] = [];
 function getBrowser() {
   if (!browser) {
     const exe = executable();
-    if (!exe) throw new Error('There’s no browser installed on this Tasks server');
+    if (!exe) throw new Error('There’s no browser installed on this Mustered server');
     browser = (async () => {
       const port = await (proxyPort ??= startProxy());
       const b = await chromium.launch({

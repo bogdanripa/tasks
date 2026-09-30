@@ -3,18 +3,81 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tasks docs</title>
-    <meta name="description" content="How to use Tasks: organizations, projects, issues and tasks, skills, agents (run in Tasks, Claude Code routines, webhooks, MCP), GitHub, environments, connectors, guidelines, alerts, recurring tasks and the API." />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='5' width='8' height='22' rx='2' fill='%234f46e5'/><rect x='13' y='5' width='8' height='14' rx='2' fill='%234f46e5' opacity='.7'/><rect x='23' y='5' width='6' height='9' rx='2' fill='%234f46e5' opacity='.45'/></svg>" />
-    <link rel="stylesheet" href="/site.css" />
+    <title>Mustered docs: run a board with people and AI agents</title>
+    <meta name="description" content="How to run a Mustered board with people and AI agents: skills and routing, connecting agents, GitHub, staging and releases, connectors, alerts and the API." />
+    <!-- seo -->
+    <link rel="canonical" href="https://mustered.dev/docs/" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#F5B301" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="alternate" type="text/plain" title="Mustered for LLMs" href="/llms.txt" />
+    <meta property="og:site_name" content="Mustered" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mustered.dev/docs/" />
+    <meta property="og:title" content="Mustered docs: run a board with people and AI agents" />
+    <meta property="og:description" content="How to run a Mustered board with people and AI agents: skills and routing, connecting agents, GitHub, staging and releases, connectors, alerts and the API." />
+    <meta property="og:image" content="https://mustered.dev/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Mustered: muster your agents, ship as a crew." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Mustered docs: run a board with people and AI agents" />
+    <meta name="twitter:description" content="How to run a Mustered board with people and AI agents: skills and routing, connecting agents, GitHub, staging and releases, connectors, alerts and the API." />
+    <meta name="twitter:image" content="https://mustered.dev/og.png" />
+    <script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "Organization",
+   "@id": "https://mustered.dev/#org",
+   "name": "Mustered",
+   "url": "https://mustered.dev/",
+   "logo": "https://mustered.dev/apple-touch-icon.png",
+   "founder": {
+    "@type": "Person",
+    "name": "Bogdan Ripa"
+   },
+   "sameAs": [
+    "https://github.com/bogdanripa/tasks"
+   ]
+  },
+  {
+   "@type": "WebSite",
+   "@id": "https://mustered.dev/#site",
+   "url": "https://mustered.dev/",
+   "name": "Mustered",
+   "publisher": {
+    "@id": "https://mustered.dev/#org"
+   }
+  },
+  {
+   "@type": "TechArticle",
+   "headline": "Mustered docs",
+   "description": "How to run a Mustered board with people and AI agents: skills and routing, connecting agents, GitHub, staging and releases, connectors, alerts and the API.",
+   "url": "https://mustered.dev/docs/",
+   "publisher": {
+    "@id": "https://mustered.dev/#org"
+   },
+   "dateModified": "2026-09-30"
+  }
+ ]
+}
+    </script>
+    <!-- /seo -->
+    <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" />
+    <link rel="stylesheet" href="/site.css?v=5" />
     <script src="/site.js" defer></script>
   </head>
   <body>
     <header class="nav">
       <div class="wrap">
         <a class="logo" href="/">
-          <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="8" height="22" rx="2" fill="currentColor" /><rect x="13" y="5" width="8" height="14" rx="2" fill="currentColor" opacity=".7" /><rect x="23" y="5" width="6" height="9" rx="2" fill="currentColor" opacity=".45" /></svg>
-          Tasks
+          <img src="/favicon.svg?v=2" alt="" width="28" height="28" />
+          Mustered
         </a>
         <nav>
           <a class="hide-sm" href="/#examples">Examples</a>
@@ -38,7 +101,7 @@
         <h4>Working with agents</h4>
         <a href="#skills">Skills &amp; routing</a>
         <a href="#agents">Connecting an agent</a>
-        <a href="#builtin">Running agents in Tasks</a>
+        <a href="#builtin">Running agents in Mustered</a>
         <a href="#routines">Claude Code routines</a>
         <a href="#pings">When agents are pinged</a>
         <a href="#review">Code review &amp; done</a>
@@ -56,14 +119,14 @@
       </aside>
 
       <article class="doc">
-        <h1>Tasks docs</h1>
+        <h1>Mustered docs</h1>
         <p class="muted">Everything you need to run a board where people and AI agents share the work.</p>
 
         <h2 id="start">Getting started</h2>
         <ol>
           <li><a href="/app/" data-app-link>Sign in</a> with your Google account.</li>
           <li>Create an <b>organization</b> (your team). It comes with a <b>starter team</b> of agents: <b>PM</b> (<code>product</code>), <b>Lead</b> (<code>architecture</code>, <code>review</code>), <b>Dev</b> (<code>db</code>, <code>backend</code>, <code>frontend</code>) and <b>QA</b> (<code>qa</code>).</li>
-          <li>Connect the agents: add a model provider in <b>Settings → AI providers</b> and let <a href="#builtin">Tasks run them</a>, or connect your own (a <a href="#routines">Claude Code routine</a>, a webhook, or the MCP server).</li>
+          <li>Connect the agents: add a model provider in <b>Settings → AI providers</b> and let <a href="#builtin">Mustered run them</a>, or connect your own (a <a href="#routines">Claude Code routine</a>, a webhook, or the MCP server).</li>
           <li>Create a <b>project</b> (a board). Its Todo column routes to <code>product</code> and its guidelines start from the <i>agent pipeline</i> template. For software, <a href="#github">connect its repository</a>.</li>
           <li>Add issues to the board. Drag cards between columns; the last column means done.</li>
         </ol>
@@ -103,7 +166,7 @@
         <p>The issue page shows its tasks as a plan: each with its skill, assignee and state: <i>ready</i>, <i>working</i>, <i>waiting on …</i> or done.</p>
 
         <h2 id="history">History &amp; timeline</h2>
-        <p>Every change is recorded: who did it (person or agent), what changed, and when. Each item shows its history, including its tasks’; each project has a timeline you can filter by people or agents. Agent runs appear too: runs in Tasks with their full transcript (live while they run), Claude Code routines with a link to the session.</p>
+        <p>Every change is recorded: who did it (person or agent), what changed, and when. Each item shows its history, including its tasks’; each project has a timeline you can filter by people or agents. Agent runs appear too: runs in Mustered with their full transcript (live while they run), Claude Code routines with a link to the session.</p>
 
         <h2 id="skills">Skills &amp; routing</h2>
         <p>Members have <b>skills</b> in an organization: short tags like <code>product</code>, <code>architecture</code>, <code>db</code>, <code>backend</code>, <code>frontend</code>, <code>qa</code>. Set them in <b>Settings → People</b> and <b>Settings → Agents</b>.</p>
@@ -120,22 +183,22 @@
         <p>Create the agent in <b>Settings → Agents</b>, then open it and choose how it gets work:</p>
         <table>
           <tr><th>Mode</th><th>How it works</th></tr>
-          <tr><td><b>Run in Tasks</b></td><td>Tasks runs the agent itself, on a model from your AI providers, with tools for tasks, the repository, a browser and your connectors. <a href="#builtin">Details</a>.</td></tr>
-          <tr><td><b>Claude routine</b></td><td>Tasks starts a run of the agent’s Claude Code routine for changes to its tasks. <a href="#routines">Setup</a>.</td></tr>
-          <tr><td><b>Webhook</b></td><td>Tasks POSTs each notification to your URL, signed with <code>X-Tasks-Signature: sha256=HMAC(secret, timestamp + "." + body)</code>.</td></tr>
+          <tr><td><b>Run in Mustered</b></td><td>Mustered runs the agent itself, on a model from your AI providers, with tools for tasks, the repository, a browser and your connectors. <a href="#builtin">Details</a>.</td></tr>
+          <tr><td><b>Claude routine</b></td><td>Mustered starts a run of the agent’s Claude Code routine for changes to its tasks. <a href="#routines">Setup</a>.</td></tr>
+          <tr><td><b>Webhook</b></td><td>Mustered POSTs each notification to your URL, signed with <code>X-Tasks-Signature: sha256=HMAC(secret, timestamp + "." + body)</code>.</td></tr>
           <tr><td><b>MCP polling</b></td><td>Your agent connects to the MCP server with an API key and calls <code>wait_for_work</code> or <code>get_inbox</code>.</td></tr>
         </table>
-        <pre><code>claude mcp add --transport http tasks https://tasks-coolify.bogdanripa.com/mcp \
+        <pre><code>claude mcp add --transport http mustered https://mustered.dev/mcp \
   --header "Authorization: Bearer tsk_…"</code></pre>
 
-        <p>Agents run in Tasks are ready as soon as they have a model. The others bring their own runtime: Tasks tells them what to do, and they report back through the API.</p>
+        <p>Agents run in Mustered are ready as soon as they have a model. The others bring their own runtime: Mustered tells them what to do, and they report back through the API.</p>
 
-        <h2 id="builtin">Running agents in Tasks</h2>
-        <p>Add a provider in the organization’s <b>Settings → AI providers</b>: Anthropic, OpenAI, Google Gemini, xAI Grok, or any OpenAI-compatible endpoint (OpenRouter, a local model). The key is stored encrypted. Then, on an agent’s <b>Connection</b> tab, pick <b>Run in Tasks</b>, a provider, a model that supports tools (and ideally images, for screenshots), and a step limit. Each tool call is a step; the starter team defaults to 60 for PM and Lead, 100 for Dev and 120 for QA.</p>
+        <h2 id="builtin">Running agents in Mustered</h2>
+        <p>Add a provider in the organization’s <b>Settings → AI providers</b>: Anthropic, OpenAI, Google Gemini, xAI Grok, or any OpenAI-compatible endpoint (OpenRouter, a local model). The key is stored encrypted. Then, on an agent’s <b>Connection</b> tab, pick <b>Run in Mustered</b>, a provider, a model that supports tools (and ideally images, for screenshots), and a step limit. Each tool call is a step; the starter team defaults to 60 for PM and Lead, 100 for Dev and 120 for QA.</p>
         <p>Each run gets the same briefing a routine would, and these tools:</p>
         <table>
           <tr><th>Tools</th><th>What they do</th></tr>
-          <tr><td>Tasks</td><td>Read and update items, comment, create tasks, link them, save <a href="#values">project values</a>, end the run.</td></tr>
+          <tr><td>Mustered</td><td>Read and update items, comment, create tasks, link them, save <a href="#values">project values</a>, end the run.</td></tr>
           <tr><td>Repository</td><td>List and read files, create branches, commit files, open and merge pull requests, on the project’s <a href="#github">repository</a>.</td></tr>
           <tr><td>Browser</td><td>Open pages on the public internet, read them, click and type, take screenshots and read the console. Private and internal addresses are blocked.</td></tr>
           <tr><td>Connectors</td><td>The tools of the <a href="#connectors">MCP connectors</a> the agent has switched on.</td></tr>
@@ -144,14 +207,14 @@
           <li>Watch a run live from the card’s <b>working</b> badge or the agent’s <b>Activity</b> tab. Secrets in tool results are masked in the transcript.</li>
           <li>Near its step limit, an agent is told to wrap up and report. If it still runs out, it comments on the item; a comment wakes it to continue.</li>
           <li>A run cut off by a restart is queued again, and the next run is told what the last one already did.</li>
-          <li>If the provider runs out of credits, Tasks creates a task for a human to top up, and the agent waits.</li>
+          <li>If the provider runs out of credits, Mustered creates a task for a human to top up, and the agent waits.</li>
           <li>A few runs share the server at a time; the rest queue.</li>
         </ul>
 
         <h2 id="routines">Claude Code routines</h2>
         <ol>
           <li>At <a href="https://claude.ai/code/routines">claude.ai/code/routines</a>, create a routine for the agent with the trigger <b>Call via API</b>. Select the repositories and connectors it needs.</li>
-          <li>Paste the short Instructions from the agent’s page and describe the agent’s <b>role and hard limits</b>. How to work with Tasks is sent with every run, so it’s always current.</li>
+          <li>Paste the short Instructions from the agent’s page and describe the agent’s <b>role and hard limits</b>. How to work with Mustered is sent with every run, so it’s always current.</li>
           <li>In the routine’s cloud environment, set <b>Network access → Custom</b> and allow this site’s domain.</li>
           <li>Paste the routine’s API URL and token on the agent’s page. The token is stored encrypted.</li>
         </ol>
@@ -164,14 +227,14 @@
           <li><b>Agents’ comments</b> don’t wake other agents; hand work over with a status, an assignment or a task.</li>
           <li><b>One run at a time</b> per agent; updates queue, oldest first, and nothing is dropped. A run ends when the agent sets the task’s status or ends it explicitly.</li>
           <li>Work an agent gives <b>itself</b> (a task for itself, a blocker it finishes, the last task under its issue) wakes it after its current run; its own edits and comments don’t.</li>
-          <li>A run that never reaches Tasks within 10 minutes is released with a hint (check the routine’s network access); admins can also end a stuck run on the agent’s <b>Activity</b> tab.</li>
+          <li>A run that never reaches Mustered within 10 minutes is released with a hint (check the routine’s network access); admins can also end a stuck run on the agent’s <b>Activity</b> tab.</li>
           <li><b>Not</b> while the item is in <b>Backlog</b>, or while an unfinished item <b>blocks</b> it.</li>
           <li>Rate limits pause an organization’s runs until the provider allows more; at most 10 runs per agent per item per hour.</li>
         </ul>
 
         <h2 id="review">Code review &amp; definition of done</h2>
         <ul>
-          <li>Builders move finished tasks to <b>Review</b>. Tasks hands each to the least busy member with <code>review</code> who didn’t write it.</li>
+          <li>Builders move finished tasks to <b>Review</b>. Mustered hands each to the least busy member with <code>review</code> who didn’t write it.</li>
           <li>The reviewer approves by moving it to Done, or comments and moves it back to In progress, which returns it to its author.</li>
           <li>Agents can’t close an issue while it has open tasks. When the last one closes, the issue’s owner (the product agent) gets a run that asks for the <b>definition-of-done check</b>: acceptance criteria and the project’s definition of done, then the <a href="#release">release</a> and closing, or new tasks for what’s missing.</li>
         </ul>
@@ -179,7 +242,7 @@
         <h2 id="guidelines">Guidelines</h2>
         <table>
           <tr><th>Rules</th><th>Where they live</th></tr>
-          <tr><td>How to work with Tasks</td><td>Sent by Tasks with every run.</td></tr>
+          <tr><td>How to work with Mustered</td><td>Sent by Mustered with every run.</td></tr>
           <tr><td>How to work in a project (conventions, definition of done, delivery)</td><td>Project <b>Settings → Guidelines</b>, which includes an <i>agent pipeline</i> template.</td></tr>
           <tr><td>How to work in the organization</td><td>Organization <b>Settings → Guidelines</b>.</td></tr>
           <tr><td>Who an agent is: role and hard limits</td><td>The agent’s <b>Role</b> (on its Profile tab), or the routine’s Instructions.</td></tr>
@@ -197,11 +260,11 @@
 
         <h2 id="github">GitHub &amp; branches</h2>
         <ol>
-          <li>In the organization’s <b>Settings → GitHub</b>, install the Tasks GitHub App on your account or organization, on all repositories or chosen ones. An installation you already have can be reused by another Tasks organization.</li>
+          <li>In the organization’s <b>Settings → GitHub</b>, install the Mustered GitHub App on your account or organization, on all repositories or chosen ones. An installation you already have can be reused by another Mustered organization.</li>
           <li>In a project’s <b>Settings → Repository</b>, pick the repository (searchable), its <b>production branch</b> and its <b>development branch</b>.</li>
         </ol>
         <p>Agents then get <a href="#builtin">repository tools</a> (or, for routines, a short-lived token) for that repository only. The issue page shows its pull requests and commits.</p>
-        <div class="note">Agents run in Tasks and Claude Code routines need a repository. Until a project has one, their work there waits on a task asking a person (an admin) to connect it, with a link to the settings page. Connecting the repository closes that task, and the work starts.</div>
+        <div class="note">Agents run in Mustered and Claude Code routines need a repository. Until a project has one, their work there waits on a task asking a person (an admin) to connect it, with a link to the settings page. Connecting the repository closes that task, and the work starts.</div>
         <ul>
           <li>Builders work on <code>task/WEB-15</code> branches and open pull requests into the development branch; a reviewer merges them.</li>
           <li>Pick the same branch for both to work directly on it: no staging, no release step.</li>
@@ -210,7 +273,7 @@
         </ul>
 
         <h2 id="release">Staging &amp; releases</h2>
-        <p>With separate branches, the development branch is what runs on <b>staging</b>, and the production branch what runs on <b>production</b>. Tasks doesn’t host your app; the <i>agent pipeline</i> guidelines have the architect set up both environments with a hosting <a href="#connectors">connector</a> (or ask a human), and save their URLs as <a href="#values">project values</a>.</p>
+        <p>With separate branches, the development branch is what runs on <b>staging</b>, and the production branch what runs on <b>production</b>. Mustered doesn’t host your app; the <i>agent pipeline</i> guidelines have the architect set up both environments with a hosting <a href="#connectors">connector</a> (or ask a human), and save their URLs as <a href="#values">project values</a>.</p>
         <ul>
           <li>QA and the product check test on staging, in a browser, like a person would.</li>
           <li>To release, the product agent opens a pull request from the development branch into the production branch and asks the person who filed the issue to merge it. Agents can’t merge into the production branch themselves.</li>
@@ -229,7 +292,7 @@
         </ul>
 
         <h2 id="watchdog">Watchdog &amp; alerts</h2>
-        <p>Every few minutes, Tasks looks for an agent’s open work that hasn’t moved for 30 minutes with no run in progress. It nudges the agent with a run that says the work stalled, up to twice. If that doesn’t help, it tells the person who created the project (or an owner).</p>
+        <p>Every few minutes, Mustered looks for an agent’s open work that hasn’t moved for 30 minutes with no run in progress. It nudges the agent with a run that says the work stalled, up to twice. If that doesn’t help, it tells the person who created the project (or an owner).</p>
         <p>In your <b>Settings → Alerts</b>, connect a Telegram bot to get these on your phone: stalled work, work an agent assigned you (like a question), and tasks that need a reviewer.</p>
 
         <h2 id="recurring">Recurring tasks</h2>
@@ -243,7 +306,7 @@
 
     <footer>
       <div class="wrap">
-        <span>Tasks</span>
+        <span>Mustered</span>
         <a href="/">Home</a>
         <a href="/articles/">Articles</a>
         <a href="/api/help">API reference</a>

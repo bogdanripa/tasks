@@ -7,7 +7,7 @@ import { badRequest, fetchError, HttpError } from './errors.js';
 import { addComment, orgRole, recordEvent, repositoryConnected, resolveOrg, resolveProject, updateItem } from './domain.js';
 
 /**
- * GitHub via the Tasks GitHub App: an org installs it once (choosing repos on GitHub), each project names
+ * GitHub via the Mustered GitHub App: an org installs it once (choosing repos on GitHub), each project names
  * one repository, and every agent run gets a token limited to that repository, valid for an hour.
  */
 const gh = config.github;
@@ -95,7 +95,7 @@ const sign = (v: string) => createHmac('sha256', config.secretsKey).update(v).di
 
 /**
  * Where to send an admin: GitHub's install page, or (existing) GitHub sign-in to pick an installation the app
- * already has, since an account can install an app only once (e.g. it's already used by another Tasks org).
+ * already has, since an account can install an app only once (e.g. it's already used by another Mustered org).
  * The cookie ties the callback back to this org and person.
  */
 export async function installStart(actor: Actor, slug: string, existing = false) {
@@ -156,7 +156,7 @@ export async function installCallback(
     await linkInstallation(orgId, actor, inst);
     return { slug: org.slug };
   }
-  if (!mine.length) throw badRequest('Your GitHub account can’t access any installation of the Tasks app yet. Use “Install on GitHub” instead.');
+  if (!mine.length) throw badRequest('Your GitHub account can’t access any installation of the Mustered app yet. Use “Install on GitHub” instead.');
   if (mine.length === 1) {
     await linkInstallation(orgId, actor, mine[0]);
     return { slug: org.slug };
@@ -304,7 +304,7 @@ export function repoOps(r: RunRepo) {
           });
         } catch (e) {
           if (f.path.startsWith('.github/workflows/')) {
-            throw badRequest(`Couldn't write ${f.path}: writing GitHub Actions workflows needs the Workflows permission. An org admin enables "Workflows: Read and write" in the Tasks GitHub App's permissions and accepts it on the installation; ask a human. (${(e as Error).message})`);
+            throw badRequest(`Couldn't write ${f.path}: writing GitHub Actions workflows needs the Workflows permission. An org admin enables "Workflows: Read and write" in the Mustered GitHub App's permissions and accepts it on the installation; ask a human. (${(e as Error).message})`);
           }
           throw e;
         }

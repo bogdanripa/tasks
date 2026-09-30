@@ -12,7 +12,7 @@ import { badRequest, HttpError, notFound } from './errors.js';
 import { orgRole, requireAgentAdmin, resolveOrg, resolveProject } from './domain.js';
 
 /**
- * MCP connectors: remote MCP servers that agents Tasks runs can use. Defined for the org or a project (then
+ * MCP connectors: remote MCP servers that agents Mustered runs can use. Defined for the org or a project (then
  * each agent switches on the ones it uses) or for one agent. Each can limit which of the server's tools
  * agents see. Auth: none, a header (e.g. a bearer API key), or OAuth.
  */
@@ -245,7 +245,7 @@ async function connect(c: Row) {
   const authProvider = c.auth === 'oauth' ? new DbOAuthProvider(c) : undefined;
   const url = new URL(c.url);
   const attempt = async (transport: StreamableHTTPClientTransport | SSEClientTransport) => {
-    const client = new Client({ name: 'tasks', version: '1.0.0' });
+    const client = new Client({ name: 'mustered', version: '1.0.0' });
     await Promise.race([
       client.connect(transport),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timed out connecting')), 20_000)),

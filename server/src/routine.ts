@@ -18,15 +18,15 @@ const MAX_ATTEMPTS = 6;
 
 /**
  * What to paste into the routine's Instructions: just "act on the payload" plus the agent's role.
- * How to work with Tasks lives in the payload, so it can change without anyone re-pasting anything.
+ * How to work with Mustered lives in the payload, so it can change without anyone re-pasting anything.
  */
 const ROLE_PLACEHOLDER = `[Describe what this agent does and what it must never do without a human's explicit approval, e.g. "You operate our hosting platform through its connector. Never delete apps or databases unless a human asked for it in a comment."]`;
 
 /** The Instructions to paste into an agent's routine, with its role description when it has one. */
 export function routineInstructions(description?: string) {
-  return `You are an AI agent working in Tasks, a tracker shared by humans and AI agents. Tasks starts this run when a task assigned to you changes.
+  return `You are an AI agent working in Mustered, a tracker shared by humans and AI agents. Mustered starts this run when a task assigned to you changes.
 
-The assignment from Tasks (in a <routine-fire-payload> block, or the message below) is what to do in this run: the task, what changed, how to work with Tasks, and the guidelines for this project. Follow it.
+The assignment from Mustered (in a <routine-fire-payload> block, or the message below) is what to do in this run: the task, what changed, how to work with Mustered, and the guidelines for this project. Follow it.
 
 Your role and hard limits:
 ${description?.trim() || ROLE_PLACEHOLDER}`;
@@ -57,7 +57,7 @@ export type Pending = {
   actorKind: 'human' | 'agent';
 };
 
-/** A run that never calls Tasks within this long is released (usually the routine's network allowlist). */
+/** A run that never calls Mustered within this long is released (usually the routine's network allowlist). */
 const RUN_CHECKIN_MINUTES = 10;
 /** A run with no API activity for this long is released (crashed or stuck). Real runs take minutes. */
 const RUN_IDLE_MINUTES = 120;
@@ -132,7 +132,7 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
     case 'triggered_item_done':
       return `${d.ref} ${q(d.title ?? '')}, which this triggered, is done`;
     case 'stalled':
-      return `Tasks' watchdog: this has been in "${d.status}" for ${d.idleMinutes} minutes with nothing happening (maybe your last run was cut off). Pick it up where you left off, or report what's blocking you and ask a human if you need one. If it's actually finished, set its status.`;
+      return `Mustered's watchdog: this has been in "${d.status}" for ${d.idleMinutes} minutes with nothing happening (maybe your last run was cut off). Pick it up where you left off, or report what's blocking you and ask a human if you need one. If it's actually finished, set its status.`;
     case 'all_tasks_done':
       return `all tasks under this issue are done (last: ${d.ref})`;
     default:
@@ -166,7 +166,7 @@ A token limited to this repository (valid until ${r.expiresAt.toISOString()}; ne
 }
 
 /**
- * If this agent's last run on the item was cut off (Tasks restarted, or it crashed), what that run already did,
+ * If this agent's last run on the item was cut off (Mustered restarted, or it crashed), what that run already did,
  * so this one continues instead of starting over (and doesn't open a second PR or branch).
  */
 async function interruptedRun(agentId: string, itemId: string): Promise<string | null> {
@@ -188,7 +188,7 @@ async function interruptedRun(agentId: string, itemId: string): Promise<string |
 }
 
 function buildPayload(p: {
-  /** routine: a Claude Code session using curl; builtin: Tasks runs the agent with tools. */
+  /** routine: a Claude Code session using curl; builtin: Mustered runs the agent with tools. */
   mode: 'routine' | 'builtin';
   repo?: RunRepo | { error: string } | null;
   /** The project's shared values (staging_url, …). */
@@ -240,24 +240,24 @@ function buildPayload(p: {
     if (item.status === p.working) return `It's already in "${p.working}".`;
     return `Move the task to "${p.working}" first, so people see you're on it (this doesn't end your run):\n   ${setStatus(p.working)}`;
   };
-  return `Tasks run for agent "${p.agentName}".
+  return `Mustered run for agent "${p.agentName}".
 ${builtin ? '' : `
 First, in your shell (the token acts as ${p.agentName} and expires ${p.expiresAt.toISOString()}; never put it in comments):
   export TASKS=${config.publicUrl} TASKS_TOKEN=${p.token}
 `}
-How to work (from Tasks):
+How to work (from Mustered):
 1. ${stepOne()}
 2. Read the task, including comments and links: ${readItem}
 3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
-4. Comment with what you did (${addComment}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Tasks hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: ${endRun}
-5. Stop. Tasks starts a new run when something changes. While an unfinished item blocks your task, Tasks won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn || p.reviewing ? `
+4. Comment with what you did (${addComment}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Mustered hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: ${endRun}
+5. Stop. Mustered starts a new run when something changes. While an unfinished item blocks your task, Mustered won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn || p.reviewing ? `
 Reviewing: a task in "${p.reviewColumnName}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
 
 ALL TASKS UNDER THIS ISSUE ARE DONE. This run is the definition-of-done check:
 - Check the result against the spec's acceptance criteria and the definition of done in the project guidelines.
 - Anything missing or wrong: create a task for it (with a skill), comment what's missing, and end the run. You'll be woken when it's done.
 - Everything passes: deliver as the project guidelines say (pull request or merge), comment what shipped with the link, and move the issue to "${done}".` : ''}
-Do the work yourself when you can. Create tasks only to hand parts to others or to split work you'll do next (tasks you assign yourself wake you after this run). To hand work to others, create tasks under the issue with a "skill" and no assignee; Tasks gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
+Do the work yourself when you can. Create tasks only to hand parts to others or to split work you'll do next (tasks you assign yourself wake you after this run). To hand work to others, create tasks under the issue with a "skill" and no assignee; Mustered gives each to the least busy member with that skill. Express order with "blocks" links; a blocked task doesn't wake its agent until its blockers are done.
 Rely on the guidelines below. When they don't say, or you're unsure, or you need something only a human can give (a decision, access, credentials, a URL, money, anything you can't or mustn't do yourself), ask instead of guessing or stopping silently: create a task under the issue assigned to the human who filed it${humans.length ? ` (humans here: ${humans.join(', ')})` : ''}, saying exactly what you need and why; link it as blocking your task (${builtin ? 'link_items {"from":"<their task>","to":"' + item.ref + '","kind":"blocks"}' : `POST /api/links {"from":"<their task>","to":"${item.ref}","kind":"blocks"}`}); comment on your task what you're waiting for, and end your run. You're woken when they finish it.
 If rules conflict: your role's hard limits win, then the project guidelines, then the organization guidelines.${builtin ? '' : ' Never put the API token in comments.'}
 
@@ -278,7 +278,7 @@ Description:
 ${item.body ? item.body.slice(0, 8000) : '(none)'}
 
 ${repoSection(p, item)}
-${builtin ? `Your tools: ${[...TASK_TOOL_NAMES, ...(p.repo && 'token' in p.repo ? REPO_TOOL_NAMES : []), ...(browserAvailable() ? BROWSER_TOOL_NAMES : [])].join(', ')}. They act as ${p.agentName}.${p.connectors?.length ? ` Connectors (MCP servers; their tools are prefixed with the connector's name): ${p.connectors.map((c) => `${c}__*`).join(', ')}.` : ''}${browserAvailable() ? ' The browser_* tools are a real browser on the public internet: test what you build or review there (open the URL, read the page, click, type, press keys, screenshot, check the console) instead of trusting the code alone.' : ''}` : `Tasks API (with the TASKS and TASKS_TOKEN set above).
+${builtin ? `Your tools: ${[...TASK_TOOL_NAMES, ...(p.repo && 'token' in p.repo ? REPO_TOOL_NAMES : []), ...(browserAvailable() ? BROWSER_TOOL_NAMES : [])].join(', ')}. They act as ${p.agentName}.${p.connectors?.length ? ` Connectors (MCP servers; their tools are prefixed with the connector's name): ${p.connectors.map((c) => `${c}__*`).join(', ')}.` : ''}${browserAvailable() ? ' The browser_* tools are a real browser on the public internet: test what you build or review there (open the URL, read the page, click, type, press keys, screenshot, check the console) instead of trusting the code alone.' : ''}` : `Mustered API (with the TASKS and TASKS_TOKEN set above).
 Send JSON bodies (content-type: application/json); "?" marks optional fields. Full reference: GET $TASKS/api/help
 ${compactReference()}`}`;
 }
@@ -333,7 +333,7 @@ export async function releaseRun(run: Record<string, any>, error: string, revoke
   return true;
 }
 
-/** Release runs that never reached Tasks or went quiet, so the agent's queue moves on. Runs every worker tick. */
+/** Release runs that never reached Mustered or went quiet, so the agent's queue moves on. Runs every worker tick. */
 export async function sweepStaleRuns() {
   const host = new URL(config.publicUrl).host;
   const stale = await sql`
@@ -343,12 +343,12 @@ export async function sweepStaleRuns() {
       (k.last_used_at < now() - ${RUN_IDLE_MINUTES + ' minutes'}::interval))`;
   for (const run of stale) {
     if (run.lastUsedAt) {
-      await releaseRun(run, `no activity for ${RUN_IDLE_MINUTES / 60} hours, so Tasks released the agent; the run may have crashed`);
+      await releaseRun(run, `no activity for ${RUN_IDLE_MINUTES / 60} hours, so Mustered released the agent; the run may have crashed`);
     } else {
       // Keep its token: a session that merely started late can still do its work.
       await releaseRun(
         run,
-        `the run hadn't reached Tasks after ${RUN_CHECKIN_MINUTES} minutes, so Tasks stopped waiting for it. If it never does, check that the routine's cloud environment allows ${host} (Network access → Custom), and open the session to see what happened`,
+        `the run hadn't reached Mustered after ${RUN_CHECKIN_MINUTES} minutes, so Mustered stopped waiting for it. If it never does, check that the routine's cloud environment allows ${host} (Network access → Custom), and open the session to see what happened`,
         false,
       );
     }
@@ -521,7 +521,7 @@ async function fireRoutine(rows: Pending[]) {
 
   const reasons = [...new Set(rows.map((r) => r.reason))];
   if (first.runtimeProviderId && first.runtimeModel) {
-    // Tasks runs this agent itself.
+    // Mustered runs this agent itself.
     const [runRow] = await sql`
       insert into agent_runs (agent_id, item_id, key_id, reasons, status, runtime, notification_ids, model)
       values (${first.agentId}, ${item.id}, ${key.id}, ${reasons}, 'fired', 'builtin', ${ids}, ${first.runtimeModel}) returning id`;

@@ -144,7 +144,7 @@ export default function OrgSettings() {
               </span>
               <span className="agent-end">
                 {m.connected ? (
-                  <span className="muted small">{m.delivery === 'builtin' ? 'runs in Tasks' : m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'MCP'}</span>
+                  <span className="muted small">{m.delivery === 'builtin' ? 'runs in Mustered' : m.delivery === 'routine' ? 'Claude routine' : m.delivery === 'webhook' ? 'webhook' : 'MCP'}</span>
                 ) : (
                   <NotConnected agent={m} admin />
                 )}
@@ -270,7 +270,7 @@ export function NameField({ label, value, onSave, allowEmpty }: { label: string;
   );
 }
 
-/** For an org without the product → build → QA team: add PM, Lead, Dev and QA, optionally run by Tasks. */
+/** For an org without the product → build → QA team: add PM, Lead, Dev and QA, optionally run by Mustered. */
 const STARTER = ['PM', 'Lead', 'Dev', 'QA'];
 
 function StarterTeam({ org, onDone, missing }: { org: string; onDone: () => void; missing: string[] }) {
@@ -298,7 +298,7 @@ function StarterTeam({ org, onDone, missing }: { org: string; onDone: () => void
       }}
     >
       <div>
-        <b>{missing.length ? 'Add the starter team' : 'Run the starter team in Tasks'}</b>
+        <b>{missing.length ? 'Add the starter team' : 'Run the starter team in Mustered'}</b>
         <p className="muted small">
           {missing.length
             ? <>PM (product), Lead (architecture, review), Dev (frontend, backend, db) and QA (qa), with their roles. New projects then come set up for them: Todo goes to the PM, Review to the Lead, and the guidelines describe the flow. </>
@@ -308,7 +308,7 @@ function StarterTeam({ org, onDone, missing }: { org: string; onDone: () => void
       </div>
       <div className="branch-fields">
         <label>
-          Run them in Tasks with
+          Run them in Mustered with
           <select value={providerId} onChange={(e) => setProviderId(e.target.value)}>
             {missing.length > 0 && <option value="">Don’t run them yet (connect each later)</option>}
             {!missing.length && <option value="">Choose a provider…</option>}

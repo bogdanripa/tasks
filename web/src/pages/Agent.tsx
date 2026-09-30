@@ -127,7 +127,7 @@ export default function AgentPage() {
       <section>
         <h2>How this agent gets work</h2>
         <div className="segmented" role="tablist">
-          {([['builtin', 'Run in Tasks'], ['routine', 'Claude routine'], ['webhook', 'Webhook'], ['poll', 'MCP polling']] as [Mode, string][]).map(([m, label]) => (
+          {([['builtin', 'Run in Mustered'], ['routine', 'Claude routine'], ['webhook', 'Webhook'], ['poll', 'MCP polling']] as [Mode, string][]).map(([m, label]) => (
             <button key={m} className={shown === m ? 'on' : ''} onClick={() => setMode(m)}>
               {label}
               {current === m && ' ✓'}
@@ -139,7 +139,7 @@ export default function AgentPage() {
         {shown === 'webhook' && <WebhookSetup agent={agent} onSaved={() => { setMode(null); reload(); }} />}
         {shown === 'poll' && (
           <div className="stack setup">
-            <p className="small">The agent connects to the Tasks MCP with an API key and calls <code>wait_for_work</code> (or <code>get_inbox</code>) to pick up assignments.</p>
+            <p className="small">The agent connects to the Mustered MCP with an API key and calls <code>wait_for_work</code> (or <code>get_inbox</code>) to pick up assignments.</p>
             {current !== 'poll' && (
               <button
                 className="small"
@@ -375,7 +375,7 @@ function BuiltinSetup({ agent, onSaved }: { agent: any; onSaved: () => void }) {
   if (providers && providers.length === 0) {
     return (
       <div className="stack setup">
-        <p className="small">Tasks can run this agent itself on an LLM from OpenAI, Anthropic, Google or xAI. First add an API key for one of them.</p>
+        <p className="small">Mustered can run this agent itself on an LLM from OpenAI, Anthropic, Google or xAI. First add an API key for one of them.</p>
         <Link to={`/${agent.orgSlug}/settings?tab=ai`} className="button small" style={{ alignSelf: 'flex-start' }}>Add an AI provider</Link>
       </div>
     );
@@ -395,7 +395,7 @@ function BuiltinSetup({ agent, onSaved }: { agent: any; onSaved: () => void }) {
       }}
     >
       <p className="small">
-        Tasks runs this agent itself: the model gets the same assignment a routine would, and Tasks’ actions as tools (read and update
+        Mustered runs this agent itself: the model gets the same assignment a routine would, and Mustered’s actions as tools (read and update
         items, comment, create and link tasks). Each run is recorded as a transcript on the Activity tab.
       </p>
       <div className="two-col" style={{ gap: 12 }}>
@@ -418,7 +418,7 @@ function BuiltinSetup({ agent, onSaved }: { agent: any; onSaved: () => void }) {
       </label>
       <ErrorNote error={error} />
       <div className="actions">
-        <button className="primary">{agent.runtime ? 'Save' : 'Run in Tasks'}</button>
+        <button className="primary">{agent.runtime ? 'Save' : 'Run in Mustered'}</button>
       </div>
     </form>
   );
@@ -445,7 +445,7 @@ function RoutineSetup({ agent, routine, onSaved }: { agent: any; routine: any; o
           <CopyField value={routine.instructions} buttonOnly />
         </li>
         <li>
-          In the routine’s cloud environment, set <b>Network access</b> to <b>Custom</b> and allow <code>{routine.allowDomain}</code>. Without it, the run can’t reach Tasks.
+          In the routine’s cloud environment, set <b>Network access</b> to <b>Custom</b> and allow <code>{routine.allowDomain}</code>. Without it, the run can’t reach Mustered.
         </li>
         <li>Save the routine, then paste its API URL and token here:</li>
       </ol>

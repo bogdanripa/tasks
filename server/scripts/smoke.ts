@@ -371,7 +371,7 @@ for (let i = 0; i < 40 && !released?.finishedAt; i++) {
   await new Promise((r) => setTimeout(r, 100));
   released = (await api('GET', `/api/agents/${rAgent.agent.id}`)).runs.find((r: any) => r.itemRef === selfTask.ref);
 }
-assert.match(released.error, /hadn't reached Tasks after 10 minutes.*Network access/);
+assert.match(released.error, /hadn't reached Mustered after 10 minutes.*Network access/);
 assert.equal((await api('GET', '/api/me', undefined, tokenOf(fires[10].text))).kind, 'agent', 'a late session keeps its token');
 // An admin can end a stuck run by hand.
 const stuck = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Stuck one', status: 'Todo', assignee: rAgent.agent.id });
@@ -1002,7 +1002,7 @@ console.log('✓ agents’ comments reach inboxes without starting runs');
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-worker' } });
 const cut = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Cut off midway', status: 'Todo', assignee: house.agent.id });
 const cutRun = await runFor(cut.ref);
-await db`update agent_runs set error = 'Tasks restarted during the run; queued again' where id = ${cutRun.id}`;
+await db`update agent_runs set error = 'Mustered restarted during the run; queued again' where id = ${cutRun.id}`;
 await api('PATCH', `/api/agents/${house.agent.id}`, { runtime: { providerId: prov.id, model: 'fake-idle' } });
 await api('POST', `/api/comments/${cut.ref}`, { body: 'carry on' });
 for (let i = 0; i < 100 && (await api('GET', `/api/agents/${house.agent.id}`)).runs.filter((r: any) => r.itemRef === cut.ref).length < 2; i++) await new Promise((r) => setTimeout(r, 100));
@@ -1036,7 +1036,7 @@ const tg = http.createServer((req, res) => {
 await new Promise<void>((r) => tg.listen(4564, r));
 await assert.rejects(api('PUT', '/api/me/alerts/telegram', { telegram: { botToken: 'bad-token-xxxxxxxxxxxxxxx', chatId: '42' } }), /Unauthorized/);
 await api('PUT', '/api/me/alerts/telegram', { telegram: { botToken: 'good-token-xxxxxxxxxxxxxxx', chatId: '42' } });
-assert.match(telegramMessages[0].text, /Tasks will send you alerts here/, 'a test message first');
+assert.match(telegramMessages[0].text, /Mustered will send you alerts here/, 'a test message first');
 assert.deepEqual((await api('GET', '/api/me/alerts')).telegram, { chatId: '42' });
 
 // ---- Watchdog: a stalled item gets two nudges, then the project's creator is pinged, once ----

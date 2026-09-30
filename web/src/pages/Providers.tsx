@@ -10,7 +10,7 @@ const KINDS: [string, string][] = [
   ['openai-compatible', 'OpenAI-compatible (OpenRouter, local…)'],
 ];
 
-/** Org settings tab: LLM provider keys for agents that Tasks runs itself. */
+/** Org settings tab: LLM provider keys for agents that Mustered runs itself. */
 export function ProvidersSection({ org }: { org: string }) {
   const { data, reload } = useFetch<any[]>(`/api/orgs/${org}/ai-providers`);
   const [provider, setProvider] = useState('anthropic');
@@ -24,7 +24,7 @@ export function ProvidersSection({ org }: { org: string }) {
   return (
     <div className="stack">
       <p className="muted small">
-        API keys for the models your agents can run on when <b>Tasks runs them</b> (an agent’s Connection tab → Run in Tasks). Keys are checked
+        API keys for the models your agents can run on when <b>Mustered runs them</b> (an agent’s Connection tab → Run in Mustered). Keys are checked
         with the provider, stored encrypted, and never shown again.
       </p>
       {data?.length === 0 && <p className="muted">No providers yet.</p>}

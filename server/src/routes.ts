@@ -120,7 +120,7 @@ export function apiRoutes(app: FastifyInstance) {
     summary: 'remove a member or agent, or leave (your own id); their open items are unassigned',
   }, async (req) => d.removeMember(await requireActor(req), req.params.org, req.params.id));
 
-  // ---- AI providers (for agents Tasks runs itself) ----
+  // ---- AI providers (for agents Mustered runs itself) ----
   route(app, 'GET', '/api/orgs/:org/ai-providers', { section: 'AI providers', summary: 'the organization’s LLM providers (keys are never returned)' }, async (req) =>
     llm.listProviders(await requireActor(req), req.params.org),
   );
@@ -185,7 +185,7 @@ export function apiRoutes(app: FastifyInstance) {
     headerValue: z.string().max(4000).optional().describe('e.g. "Bearer <key>"; stored encrypted, never returned'),
     allowedTools: z.array(z.string()).nullable().optional().describe('null: every tool the server offers'),
   });
-  route(app, 'GET', '/api/orgs/:org/connectors', { section: 'Connectors', summary: 'the org’s MCP connectors (every agent Tasks runs gets them; admins)' }, async (req) =>
+  route(app, 'GET', '/api/orgs/:org/connectors', { section: 'Connectors', summary: 'the org’s MCP connectors (every agent Mustered runs gets them; admins)' }, async (req) =>
     connectors.listConnectors(await requireActor(req), { org: req.params.org }),
   );
   route(app, 'POST', '/api/orgs/:org/connectors', { section: 'Connectors', summary: 'add an MCP connector for the whole org (admins)', body: connectorBody }, async (req, { body }) =>
@@ -240,7 +240,7 @@ export function apiRoutes(app: FastifyInstance) {
     }
   });
 
-  route(app, 'GET', '/api/orgs/:org/github', { section: 'GitHub', summary: 'whether the org has the Tasks GitHub App installed, and which repositories it can reach' }, async (req) =>
+  route(app, 'GET', '/api/orgs/:org/github', { section: 'GitHub', summary: 'whether the org has the Mustered GitHub App installed, and which repositories it can reach' }, async (req) =>
     github.orgGithub(await requireActor(req), req.params.org),
   );
   route(app, 'GET', '/api/orgs/:org/github/install', {
@@ -308,7 +308,7 @@ export function apiRoutes(app: FastifyInstance) {
   });
   route(app, 'POST', '/api/orgs/:org/starter-team', {
     section: 'Agents',
-    summary: 'add the starter team (PM, Lead, Dev, QA) with skills and roles, skipping names already taken; optionally run them in Tasks (admins)',
+    summary: 'add the starter team (PM, Lead, Dev, QA) with skills and roles, skipping names already taken; optionally run them in Mustered (admins)',
     body: z.object({ runtime: z.object({ providerId: z.string(), model: z.string().min(1) }).nullable().optional() }),
   }, async (req, { body }) => d.addStarterTeam(await requireActor(req), req.params.org, body.runtime));
   route(app, 'GET', '/api/agents/:id', { section: 'Agents', summary: 'an agent’s settings, keys, runs, queue and recent notifications (admins)' }, async (req) => {
@@ -370,7 +370,7 @@ export function apiRoutes(app: FastifyInstance) {
         .object({ providerId: z.string().uuid(), model: z.string().min(1).max(120), maxSteps: z.number().int().min(3).max(200).optional() })
         .nullable()
         .optional()
-        .describe('run the agent in Tasks with this provider and model; null to stop'),
+        .describe('run the agent in Mustered with this provider and model; null to stop'),
     }),
   }, async (req, { body }) => d.updateAgent(await requireActor(req), req.params.id, body));
   route(app, 'DELETE', '/api/agents/:id', {

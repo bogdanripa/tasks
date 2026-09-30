@@ -8,14 +8,14 @@ import { HttpError } from './errors.js';
 import { waitForWork } from './delivery.js';
 import * as d from './domain.js';
 
-const INSTRUCTIONS = `Tasks: a tracker shared by humans and agents.
+const INSTRUCTIONS = `Mustered: a tracker shared by humans and agents.
 - An issue is a need. Tasks are the assignable units of work under an issue (same project).
 - Refs look like "org/KEY-12"; "KEY-12" works when unambiguous. Projects are "org/KEY".
 - Start with get_inbox (or wait_for_work to block until something arrives), then get_item for context.
 - Move your work across the project's columns with update_item(status). The last column means done.
 - When your work reveals a need elsewhere (any project, even another org you belong to), create_issue with triggered_by set to the item you are working on, so the chain stays traceable.
 - get_item returns the project's and organization's guidelines (project.guidelines, project.orgGuidelines): follow them. Your own hard limits win over project guidelines, which win over organization guidelines.
-- Hand work over by skill, not by name: create tasks with skill (e.g. "backend") and no assignee; Tasks assigns the least busy member with that skill. list_members shows everyone's skills. Use blocks links for dependencies; blocked tasks don't wake their agents.
+- Hand work over by skill, not by name: create tasks with skill (e.g. "backend") and no assignee; Mustered assigns the least busy member with that skill. list_members shows everyone's skills. Use blocks links for dependencies; blocked tasks don't wake their agents.
 - Move an item to the in-progress column when you start on it. Leave a comment summarizing what you did before marking it done.`;
 
 const text = (value: unknown) => ({
@@ -23,7 +23,7 @@ const text = (value: unknown) => ({
 });
 
 function buildServer(actor: Actor) {
-  const server = new McpServer({ name: 'tasks', version: '0.1.0' }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: 'mustered', version: '0.1.0' }, { instructions: INSTRUCTIONS });
 
   const tool = <S extends z.ZodRawShape>(
     name: string,

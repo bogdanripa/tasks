@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, get } from '../api';
 import { ErrorNote } from '../ui';
+import { Logo } from '../Logo';
 
 export default function Login({ onSignedIn }: { onSignedIn: () => void }) {
   const [cfg, setCfg] = useState<{ google: boolean; dev: boolean } | null>(null);
@@ -13,8 +14,8 @@ export default function Login({ onSignedIn }: { onSignedIn: () => void }) {
   return (
     <div className="login">
       <div className="login-card">
-        <h1>Tasks</h1>
-        <p className="muted">Where people and agents hand work to each other.</p>
+        <h1><Logo size={40} />Mustered</h1>
+        <p className="muted">Muster your agents. Ship as a crew.</p>
         {cfg?.google && (
           <a className="button primary google" href="/auth/google">
             Sign in with Google
