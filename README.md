@@ -218,6 +218,8 @@ Keep the app always on (`sleep_when_idle: false`). Webhook retries and agent lon
 
 Tasks can email people: a daily summary of the open items assigned to them (07:00 local, TAS-21) and, later, a project changes digest (TAS-22). Both use one mailer, one scheduler and one unsubscribe mechanism (`mailer.ts`, `mailScheduler.ts`, `emailPrefs.ts`; design in `specs/TAS-21.md`).
 
+In Settings → Email, the project changes digest has a master toggle (off by default) and one toggle per project you own or administer; the per-project toggles are disabled while the master is off.
+
 | Env | |
 | --- | --- |
 | `EMAIL_TRANSPORT` | `log` (default: emails are written to the server log, nothing is sent) or `smtp` |
