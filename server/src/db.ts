@@ -15,9 +15,33 @@ export type Db = postgres.Sql | postgres.TransactionSql;
 export const bus = new EventEmitter();
 bus.setMaxListeners(0);
 
+// Side effects (e.g. email) queued inside a transaction and run only once it has committed.
+const commitHooks = new WeakMap<object, Array<() => Promise<void> | void>>();
+const inFlight = new Set<Promise<void>>();
+
+/** Run `fn` after `tx` commits (never on rollback), without making the caller wait; failures are logged. */
+export function afterCommit(tx: Db, fn: () => Promise<void> | void) {
+  const list = commitHooks.get(tx) ?? [];
+  list.push(fn);
+  commitHooks.set(tx, list);
+}
+
+/** Test hook: resolves once every after-commit hook started so far has finished. */
+export async function flushMail() {
+  while (inFlight.size) await Promise.allSettled([...inFlight]);
+}
+
 export async function mutate<T>(fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
-  const result = (await sql.begin(fn)) as T;
+  let txRef: object | undefined;
+  const result = (await sql.begin((tx) => { txRef = tx; return fn(tx); })) as T;
   bus.emit('pulse');
+  for (const hook of (txRef && commitHooks.get(txRef)) || []) {
+    const p: Promise<void> = Promise.resolve()
+      .then(hook)
+      .catch((err) => console.error('after-commit hook failed', { error: err instanceof Error ? err.message : String(err) }))
+      .finally(() => inFlight.delete(p));
+    inFlight.add(p);
+  }
   return result;
 }
 

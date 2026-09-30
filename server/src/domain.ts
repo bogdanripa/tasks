@@ -7,6 +7,7 @@ import { config } from './config.js';
 import { isAlert } from './alerts.js';
 import { agentReady, PIPELINE_TEMPLATE, seedStarterAgents, STARTER_AGENTS } from './starter.js';
 import { canUseTools } from './llm.js';
+import { emailAssignment } from './assignmentMail.js';
 
 export type Role = 'owner' | 'admin' | 'member';
 export type ItemType = 'issue' | 'task';
@@ -218,6 +219,7 @@ async function routeItem(tx: Db, actor: Actor, itemId: string) {
     data: { ref: item.ref, title: item.title, changes: { assignee: [null, member.name] }, routedBy: skill },
   });
   await notify(tx, member.id, ev, itemId, 'assigned', actor);
+  emailAssignment(tx, actor, { itemId, assigneeId: member.id, previousAssigneeId: null });
 }
 
 /**
@@ -245,6 +247,7 @@ async function handOff(tx: Db, actor: Actor, itemId: string, from: string, to: s
       data: { ref: cur.ref, title: cur.title, changes: { assignee: [cur.assigneeName, reviewer.name] }, handoff: handoffs[to] },
     });
     await notify(tx, reviewer.id, ev, itemId, 'review_requested', actor);
+    emailAssignment(tx, actor, { itemId, assigneeId: reviewer.id, previousAssigneeId: cur.assigneeId });
   } else if (handoffs[from] && !handoffs[to]) {
     if (to === done || !cur.handedOffFrom) {
       await tx`update items set handed_off_from = null where id = ${itemId}`;
@@ -260,6 +263,7 @@ async function handOff(tx: Db, actor: Actor, itemId: string, from: string, to: s
       data: { ref: cur.ref, title: cur.title, changes: { assignee: [cur.assigneeName, author.name] }, returned: true },
     });
     await notify(tx, author.id, ev, itemId, 'changes_requested', actor);
+    emailAssignment(tx, actor, { itemId, assigneeId: author.id, previousAssigneeId: cur.assigneeId });
   }
 }
 
@@ -920,7 +924,10 @@ export async function createItem(actor: Actor, project: Row, input: CreateItemIn
       orgId: project.orgId, projectId: project.id, itemId: item.id, actorId: actor.id, type: 'item.created',
       data: { ref, type: input.type, title, status, parentRef: parent?.ref, assignee: assignee?.name, triggeredBy: trigger?.ref, schedule: input.schedule, skill: skill ?? undefined },
     });
-    if (assignee) await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
+    if (assignee) {
+      await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
+      emailAssignment(tx, actor, { itemId: item.id, assigneeId: assignee.id, previousAssigneeId: null });
+    }
     if (parent) {
       const pev = await emit(tx, {
         orgId: project.orgId, projectId: project.id, itemId: parent.id, actorId: actor.id, type: 'task.added', data: { ref, title },
@@ -1030,7 +1037,10 @@ export async function updateItem(actor: Actor, ref: string, patch: ItemPatch) {
       orgId: item.orgId, projectId: item.projectId, itemId: item.id, actorId: actor.id, type: 'item.updated',
       data: { ref: item.ref, title: patch.title?.trim() ?? item.title, changes },
     });
-    if (changes.assignee && assignee) await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
+    if (changes.assignee && assignee) {
+      await notify(tx, assignee.id, ev, item.id, 'assigned', actor);
+      emailAssignment(tx, actor, { itemId: item.id, assigneeId: assignee.id, previousAssigneeId: item.assigneeId });
+    }
     // A routine run's last step is setting its task's status: that ends the run and lets the agent's queue move.
     // Moving into the working column is "started", not "finished", so it doesn't end the run.
     if (changes.status && actor.keyId && status !== workingColumn(project.columns)) await finishRun(tx, actor.id, actor.keyId, item.id);
