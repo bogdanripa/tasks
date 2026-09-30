@@ -44,6 +44,15 @@ export const config = {
     intervalSeconds: Number(process.env.WATCHDOG_INTERVAL_SECONDS ?? 300),
     maxNudges: 2,
   },
+  // Outgoing email (TAS-21). Defaults to 'log' so the server boots and works with no credentials;
+  // 'smtp' is validated at first send, never at boot.
+  email: {
+    transport: (process.env.EMAIL_TRANSPORT ?? 'log').trim().toLowerCase(),
+    from: process.env.EMAIL_FROM ?? '',
+    smtpUrl: process.env.SMTP_URL ?? '',
+    tickSeconds: Number(process.env.EMAIL_TICK_SECONDS ?? 60),
+    windowHours: Number(process.env.EMAIL_WINDOW_HOURS ?? 6),
+  },
   secretsKey: process.env.SECRETS_KEY ?? (process.env.NODE_ENV === 'production' ? '' : 'dev-only-insecure-secrets-key'),
   // Images pasted/uploaded into descriptions and comments (TAS-2). No env var: the limit is a product
   // decision, not a deployment one, and mirrored client-side so a rejection is immediate.

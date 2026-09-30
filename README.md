@@ -214,6 +214,28 @@ The image is built for `linux/arm64`. It listens on `:80` on IPv4 and IPv6 and e
 
 Keep the app always on (`sleep_when_idle: false`). Webhook retries and agent long-polls need a live process.
 
+### Email (daily summaries)
+
+Tasks can email people: a daily summary of the open items assigned to them (07:00 local, TAS-21) and, later, a project changes digest (TAS-22). Both use one mailer, one scheduler and one unsubscribe mechanism (`mailer.ts`, `mailScheduler.ts`, `emailPrefs.ts`; design in `specs/TAS-21.md`).
+
+| Env | |
+| --- | --- |
+| `EMAIL_TRANSPORT` | `log` (default: emails are written to the server log, nothing is sent) or `smtp` |
+| `EMAIL_FROM` | sender for `smtp`, e.g. `Tasks <noreply@example.com>` |
+| `SMTP_URL` | for `smtp`, e.g. `smtps://user:pass@smtp.example.com:465`. Any provider that offers SMTP works |
+| `EMAIL_TICK_SECONDS` | how often the scheduler looks for people whose send time has come (default 60) |
+| `EMAIL_WINDOW_HOURS` | how long after the send time a failed email is retried (default 6) |
+
+- **Scheduler:** runs in the server, once a minute. Each person has a time zone (set from their browser the first time they use the app; changeable in Settings). Someone with no time zone yet gets nothing until they have opened the app once.
+- **At most one email per person per topic per local day**, recorded in `email_sends`, so restarts and overlapping deploys can't double-send. A failed send is logged and retried every tick until the window ends.
+- **Unsubscribe:** every email carries a signed, login-free link (and `List-Unsubscribe` headers, RFC 8058 one-click). Tokens are HMACs derived from `SECRETS_KEY`, so rotating that key invalidates old links. People can also toggle it in Settings.
+- **Project changes digest (TAS-22):** opt-in, 06:00 local, sent to org owners/admins for the projects they own, only when something changed; per-project and global unsubscribe (design in `specs/TAS-22.md`).
+- **Settings API:** `GET/PUT /api/me/email` (time zone, summary on/off), `PUT /api/me/timezone` (sets the zone only if still unset; the web app uses it to auto-detect), `timezone` in `GET /api/me`, and the login-free `GET/POST /api/email/unsubscribe` and `POST /api/email/resubscribe` (`emailPrefs.ts`). `npm run smoke:email-prefs -w server` checks the tokens with no server or database. In the web app, Settings → Email has the summary toggle and a time zone picker; on first load, if the zone is still unset, the app saves the browser's zone automatically.
+- **Assigned-items summary** (`assignedSummary.ts`, topic `assigned_summary`, on by default): at 07:00 local, open items assigned to the person (not Backlog, not Done) in orgs they currently belong to, grouped by project, as text and HTML with an unsubscribe footer. Capped at 200 rows ("and N more"); nobody with nothing open gets an email. The DB-backed checks (time zones, once per day, retry, takeover, unsubscribe, org membership) are in `npm run smoke`.
+- **Assignment emails (TAS-34, `assignmentMail.ts`):** when an item is assigned to a human (on creation, reassignment, skill routing or a review hand-off) they get one email with who assigned it, the item, its issue, the project and a link. None for agents, self-assignment, an unchanged assignee or unassigning. Sent after the change commits, best-effort: a mail failure is logged (metadata only) and never fails the assignment. Uses the same `EMAIL_TRANSPORT`/`EMAIL_FROM`/`SMTP_URL` settings; no new variables, not subject to the summary/digest preferences. `DATABASE_URL=... npm run smoke:assignment-mail -w server` checks it.
+- **Before credentials exist:** leave `EMAIL_TRANSPORT` unset; the mail shows up in the log instead of an inbox.  `npm run smoke:mailer -w server` checks the mailer, and `npm run smoke:scheduler -w server` the scheduler's time-zone logic, with no server or database.
+- **Project changes digest (TAS-22, `projectDigest.ts`):** off until a person opts in; sent at 06:00 local to org owners/admins, covering events (created, updated, commented, deleted) in the projects they own since the last digest sent (`digest_cursors`; first email covers 24h, never more than 7 days back). Capped at 50 events per project / 300 per email, with per-project and unsubscribe-all links. `DATABASE_URL=... npm run smoke:digest -w server` runs it against a real database with a capturing transport and `mailTick(now)`.
+
 ### Staging and production
 
 - **Production:** `tasks` — https://tasks-coolify.bogdanripa.com — deploys from `main`.

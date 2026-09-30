@@ -39,6 +39,15 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
+  // Account creation happens server-side with no browser zone, so fill it in on the first visit. The server only
+  // sets it while it is still null, so this never overwrites a choice made in Settings.
+  const needsZone = !!me && me.kind === 'human' && me.timezone === null;
+  useEffect(() => {
+    if (!needsZone) return;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) api('PUT', '/api/me/timezone', { timezone: tz }, { toast: false }).then(refreshMe, () => {});
+  }, [needsZone]);
+
   if (me === undefined) return <div className="center muted">Loading…</div>;
   if (me === null) return <Login onSignedIn={refreshMe} />;
 

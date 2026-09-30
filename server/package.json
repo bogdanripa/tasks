@@ -7,7 +7,12 @@
     "build": "tsc -p .",
     "start": "node dist/index.js",
     "seed": "tsx scripts/seed.ts",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "smoke:mailer": "tsx scripts/mailer-smoke.ts",
+    "smoke:email-prefs": "tsx scripts/email-prefs-smoke.ts",
+    "smoke:scheduler": "tsx scripts/mailscheduler-smoke.ts",
+    "smoke:digest": "tsx scripts/project-digest-smoke.ts",
+    "smoke:assignment-mail": "tsx scripts/assignment-mail-smoke.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.62",
@@ -24,12 +29,14 @@
     "diff": "^9.0.0",
     "fastify": "^5.12.5",
     "jose": "^6.2.12",
+    "nodemailer": "^10.0.13",
     "playwright-core": "^1.63.0",
     "postgres": "^3.4.9",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
+    "@types/nodemailer": "^8.0.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
