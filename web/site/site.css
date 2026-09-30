@@ -72,7 +72,7 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
 .nav .btn { padding: 7px 14px; font-size: 14px; }
 
 /* hero */
-.hero { padding: 72px 0 40px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
+.hero { padding: 72px 24px 40px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
 .eyebrow { display: inline-block; font-size: 13px; font-weight: 600; color: var(--agent); background: var(--agent-soft); padding: 4px 10px; border-radius: 20px; margin-bottom: 18px; }
 .hero h1 { font-size: 52px; margin: 0 0 18px; }
 .hero h1 em { font-style: normal; color: var(--accent); }
@@ -210,14 +210,12 @@ h1, h2 { letter-spacing: -0.02em; font-weight: 800; }
 .logo { color: var(--text); font-weight: 800; font-size: 21px; }
 .logo img { border-radius: 8px; transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
 .logo:hover img { transform: rotate(-10deg) scale(1.08); }
-.btn { border: 2px solid var(--brand-ink); border-radius: 12px; box-shadow: var(--pop); transition: transform .12s, box-shadow .12s; }
-.btn:hover { border-color: var(--brand-ink); transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--brand-ink); }
-.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--brand-ink); }
-.btn.primary { background: var(--brand); border-color: var(--brand-ink); color: var(--brand-ink); }
-.btn.primary:hover { filter: none; }
-.nav .btn { box-shadow: 2px 2px 0 var(--brand-ink); }
+.btn { border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 2px rgb(35 27 14 / 0.08); transition: transform .12s, box-shadow .12s, background .12s; }
+.btn:hover { border-color: color-mix(in srgb, var(--text) 25%, var(--border)); transform: translateY(-1px); box-shadow: 0 4px 12px rgb(35 27 14 / 0.12); }
+.btn:active { transform: none; box-shadow: 0 1px 2px rgb(35 27 14 / 0.08); }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+.btn.primary:hover { filter: none; background: #ffc21a; border-color: #ffc21a; }
 @media (prefers-color-scheme: dark) {
-  .btn { border-color: #000; }
   .btn:not(.primary) { background: var(--surface-2); color: var(--text); }
 }
 .eyebrow { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
@@ -251,3 +249,4 @@ html, body { overflow-x: clip; }
 @media (prefers-color-scheme: dark) {
   .hero h1 em { background: var(--brand); color: var(--brand-ink); padding: 0 10px; border-radius: 10px; }
 }
+@media (max-width: 520px) { .hero { padding-left: 16px; padding-right: 16px; } }

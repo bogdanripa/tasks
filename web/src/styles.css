@@ -78,9 +78,8 @@ button, .button {
   white-space: nowrap;
 }
 button:hover, .button:hover { background: var(--surface-2); text-decoration: none; }
-button.primary, .button.primary { background: var(--brand); border-color: var(--brand-ink); color: var(--brand-ink); font-weight: 700; box-shadow: 2px 2px 0 var(--brand-ink); }
-button.primary:active, .button.primary:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--brand-ink); }
-button.primary:hover, .button.primary:hover { filter: brightness(1.08); }
+button.primary, .button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 600; }
+button.primary:hover, .button.primary:hover { background: #ffc21a; border-color: #ffc21a; }
 button.ghost { background: transparent; border-color: transparent; }
 button.ghost:hover { background: var(--surface-2); }
 button.small { padding: 3px 9px; font-size: 12px; }
