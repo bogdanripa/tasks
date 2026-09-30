@@ -232,6 +232,7 @@ Tasks can email people: a daily summary of the open items assigned to them (07:0
 - **Project changes digest (TAS-22):** opt-in, 06:00 local, sent to org owners/admins for the projects they own, only when something changed; per-project and global unsubscribe (design in `specs/TAS-22.md`).
 - **Settings API:** `GET/PUT /api/me/email` (time zone, summary on/off), `PUT /api/me/timezone` (sets the zone only if still unset; the web app uses it to auto-detect), `timezone` in `GET /api/me`, and the login-free `GET/POST /api/email/unsubscribe` and `POST /api/email/resubscribe` (`emailPrefs.ts`). `npm run smoke:email-prefs -w server` checks the tokens with no server or database.
 - **Before credentials exist:** leave `EMAIL_TRANSPORT` unset; the mail shows up in the log instead of an inbox.  `npm run smoke:mailer -w server` checks the mailer, and `npm run smoke:scheduler -w server` the scheduler's time-zone logic, with no server or database.
+- **Project changes digest (TAS-22, `projectDigest.ts`):** off until a person opts in; sent at 06:00 local to org owners/admins, covering events (created, updated, commented, deleted) in the projects they own since the last digest sent (`digest_cursors`; first email covers 24h, never more than 7 days back). Capped at 50 events per project / 300 per email, with per-project and unsubscribe-all links. `DATABASE_URL=... npm run smoke:digest -w server` runs it against a real database with a capturing transport and `mailTick(now)`.
 
 ### Staging and production
 
