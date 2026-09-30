@@ -1445,6 +1445,113 @@ console.log('✓ email tables: timezone, prefs (explicit choice per scope), one 
 }
 console.log('✓ email prefs: timezone (set-once vs explicit), signed unsubscribe/resubscribe, tamper rejected');
 
+// Assigned-items summary (TAS-39): the daily job end to end, with simulated time and a captured transport.
+{
+  const { setTransportForTests } = await import('../src/mailer.js');
+  await import('../src/assignedSummary.js'); // registers the job in this process
+  const { mailTick } = await import('../src/mailScheduler.js');
+  const { unsubscribeToken } = await import('../src/emailPrefs.js');
+  const sent: any[] = [];
+  let failing = false;
+  setTransportForTests({ async send(e) { if (failing) throw new Error('smtp down'); sent.push(e); } });
+  const mine = (to: string) => sent.filter((e) => e.to === to);
+
+  const mk = async (name: string) => {
+    cookie = '';
+    await api('POST', '/auth/dev', { email: `${name}-${run}@example.com`, name });
+    return api('GET', '/api/me');
+  };
+  const eve = await mk('sumeve');
+  const sumOrg = `sum-${run}`;
+  await api('POST', '/api/orgs', { slug: sumOrg, name: 'Sum', starterAgents: false });
+  await api('POST', `/api/orgs/${sumOrg}/projects`, { key: 'SUM', name: 'Summaries' });
+  const eveMail = `sumeve-${run}@example.com`;
+  const item = (title: string, status: string, extra: object = {}) =>
+    api('POST', `/api/projects/${sumOrg}/SUM/items`, { type: 'issue', title, status, assignee: eveMail, ...extra });
+  const open = await item('Open <b>thing</b>', 'In progress');
+  await item('Backlog thing', 'Backlog');
+  await item('Finished thing', 'Done');
+  await api('POST', `/api/projects/${sumOrg}/SUM/items`, { type: 'task', title: 'Child task', status: 'Todo', assignee: eveMail, parent: open.ref });
+  const fay = await mk('sumfay'); // second user in another zone, nothing assigned
+  await db`update accounts set timezone = 'Europe/Bucharest' where id = ${eve.id}`;
+  await db`update accounts set timezone = 'America/Los_Angeles' where id = ${fay.id}`;
+  const fayMail = `sumfay-${run}@example.com`;
+  const gus = await mk('sumgus'); // Bucharest too, but nothing assigned
+  const gusMail = `sumgus-${run}@example.com`;
+  await db`update accounts set timezone = 'Europe/Bucharest' where id = ${gus.id}`;
+  // Eve is in Bucharest (UTC+2 in March): 05:00Z = 07:00 there, 21:00 the day before in Los Angeles.
+  const day = (h: string) => new Date(`2030-03-05T${h}:00Z`);
+
+  await mailTick(day('04:00'));
+  assert.equal(mine(eveMail).length, 0, 'before 07:00 local: nothing');
+  await mailTick(day('05:00'));
+  assert.equal(mine(eveMail).length, 1, 'at 07:00 local: one summary');
+  const m = mine(eveMail)[0];
+  assert.match(m.subject, /^Your open items: 2 in 1 project$/);
+  assert.ok(m.text.includes('Open <b>thing</b>') && m.text.includes('Child task') && !m.text.includes('Backlog thing') && !m.text.includes('Finished thing'));
+  assert.ok(m.text.includes(`/app/i/${sumOrg}/SUM-${open.number}`) && m.text.includes(`(in ${open.ref}`), 'links and parent issue');
+  assert.ok(m.html.includes('Open &#60;b&#62;thing') && !m.html.includes('<b>thing'), 'html escaped');
+  assert.ok(m.text.includes('/api/email/unsubscribe?t=') && m.html.includes('/api/email/unsubscribe?t='), 'unsubscribe footer');
+  assert.match(m.headers['List-Unsubscribe'], /\/api\/email\/unsubscribe\?t=/);
+  assert.equal(mine(gusMail).length, 0, 'no open items: nothing sent');
+  await mailTick(day('05:01'));
+  assert.equal(mine(eveMail).length, 1, 'second tick, same local date: no duplicate');
+  assert.equal((await db`select status from email_sends where account_id = ${gus.id} and topic = 'assigned_summary' and local_date = '2030-03-05'`)[0]?.status, 'empty', 'empty day recorded, not re-evaluated');
+
+  // Another zone fires at its own 07:00 (14:00Z in LA, standard time on 2030-03-05).
+  await db`insert into memberships (org_id, account_id, role) select id, ${fay.id}, 'member' from orgs where slug = ${sumOrg}`;
+  await db`insert into items (project_id, number, type, title, status, assignee_id, created_by)
+           select p.id, 900, 'issue', 'Fay item', 'Todo', ${fay.id}, ${eve.id} from projects p join orgs o on o.id = p.org_id where o.slug = ${sumOrg} and p.key = 'SUM'`;
+  await mailTick(day('13:59'));
+  assert.equal(mine(fayMail).length, 0);
+  await mailTick(day('15:00'));
+  assert.equal(mine(fayMail).length, 1, 'Los Angeles gets its own 07:00 (within the window)');
+
+  // Failure: nothing crashes, the claim is released, the next tick retries; no duplicate afterwards.
+  const next = (h: string) => new Date(`2030-03-06T${h}:00Z`);
+  failing = true;
+  await mailTick(next('05:00'));
+  assert.equal(mine(eveMail).length, 1);
+  assert.equal((await db`select 1 from email_sends where account_id = ${eve.id} and local_date = '2030-03-06'`).length, 0, 'failed send leaves no claim');
+  failing = false;
+  await mailTick(next('05:01'));
+  assert.equal(mine(eveMail).length, 2, 'retried after failure');
+  await mailTick(next('05:02'));
+  assert.equal(mine(eveMail).length, 2);
+
+  // A crashed claim older than 10 minutes is taken over; a fresh one is respected.
+  const third = new Date('2030-03-07T05:00:00Z');
+  await db`insert into email_sends (account_id, topic, local_date, status) values (${eve.id}, 'assigned_summary', '2030-03-07', 'sending')`;
+  await mailTick(third);
+  assert.equal(mine(eveMail).length, 2, 'fresh claim held by another process is respected');
+  await db`update email_sends set claimed_at = now() - interval '11 minutes' where account_id = ${eve.id} and local_date = '2030-03-07'`;
+  await mailTick(third);
+  assert.equal(mine(eveMail).length, 3, 'stale claim is taken over');
+
+  // Unsubscribe via the signed link stops it; re-subscribing restores it.
+  const tok = unsubscribeToken(eve.id, 'assigned_summary');
+  await fetch(`${BASE}/api/email/unsubscribe?t=${encodeURIComponent(tok)}`);
+  await mailTick(new Date('2030-03-08T05:00:00Z'));
+  assert.equal(mine(eveMail).length, 3, 'unsubscribed: nothing');
+  await fetch(`${BASE}/api/email/resubscribe?t=${encodeURIComponent(tok)}`, { method: 'POST' });
+  await mailTick(new Date('2030-03-09T05:00:00Z'));
+  assert.equal(mine(eveMail).length, 4, 'resubscribed: sent again');
+
+  // Only orgs the user still belongs to: an assigned item in an org they left is not listed.
+  await db`delete from memberships where account_id = ${eve.id} and org_id = (select id from orgs where slug = ${sumOrg})`;
+  await mailTick(new Date('2030-03-10T05:00:00Z'));
+  assert.equal(mine(eveMail).length, 4, 'items in an org the user left are excluded (so nothing to send)');
+
+  // Cap: 200 rows plus "and N more".
+  const { renderSummary, SUMMARY_CAP } = await import('../src/assignedSummary.js');
+  const rows = Array.from({ length: SUMMARY_CAP + 7 }, (_, i) => ({ ref: `o/K-${i + 1}`, title: `t${i}`, status: 'Todo', project_key: 'K', project_name: 'K', org_slug: 'o', parent_ref: null, parent_title: null }));
+  const capped = renderSummary(rows, tok);
+  assert.equal((capped.text.match(/^  o\/K-/gm) ?? []).length, SUMMARY_CAP);
+  assert.ok(capped.text.includes('…and 7 more') && capped.subject.startsWith(`Your open items: ${SUMMARY_CAP + 7} in 1 project`));
+  setTransportForTests(null);
+}
+console.log('✓ assigned summary: 07:00 local per zone, once per day, empty skipped, retry, takeover, unsubscribe, org membership, cap');
+
 // Isolation: a stranger sees nothing.
 cookie = '';
 await api('POST', '/auth/dev', { email: `mallory-${run}@example.com` });

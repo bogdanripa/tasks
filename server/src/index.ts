@@ -15,6 +15,7 @@ import { mcpRoutes } from './mcp.js';
 import { startDeliveryWorker } from './delivery.js';
 import { collectRoutes } from './apidoc.js';
 import { startMailScheduler } from './mailScheduler.js';
+import './assignedSummary.js'; // registers the daily assigned-items summary job
 import { startScheduler } from './schedules.js';
 import { drainInHouse, recoverInterruptedRuns } from './runtime.js';
 
