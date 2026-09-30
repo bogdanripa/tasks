@@ -44,6 +44,7 @@ export type Me = {
   avatarUrl: string | null;
   orgs: { id: string; slug: string; name: string; role: string }[];
   unread: number;
+  timezone?: string | null;
 };
 
 export type Item = {
