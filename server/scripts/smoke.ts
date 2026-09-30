@@ -1411,6 +1411,40 @@ console.log('✓ org deletion (owner-only, confirmed, cascades, agents revoked)'
 }
 console.log('✓ email tables: timezone, prefs (explicit choice per scope), one claim per user/topic/day');
 
+// Email preferences API, timezone and signed unsubscribe links (TAS-37).
+{
+  const { unsubscribeToken } = await import('../src/emailPrefs.js'); // same SECRETS_KEY as the server (dev default)
+  cookie = '';
+  await api('POST', '/auth/dev', { email: `prefs-${run}@example.com` });
+  const me = await api('GET', '/api/me');
+  assert.equal(me.timezone, null);
+  assert.deepEqual((await api('GET', '/api/me/email')).topics, { assignedSummary: true }); // default on
+  await assert.rejects(api('PUT', '/api/me/timezone', { timezone: 'Mars/Base' }), /400/);
+  assert.equal((await api('PUT', '/api/me/timezone', { timezone: 'Europe/Bucharest' })).timezone, 'Europe/Bucharest');
+  assert.equal((await api('PUT', '/api/me/timezone', { timezone: 'Asia/Tokyo' })).timezone, 'Europe/Bucharest'); // never overwrites
+  assert.equal((await api('PUT', '/api/me/email', { timezone: 'Asia/Tokyo' })).timezone, 'Asia/Tokyo'); // explicit change does
+  assert.equal((await api('GET', '/api/me')).timezone, 'Asia/Tokyo');
+
+  const t = unsubscribeToken(me.id, 'assigned_summary');
+  const anon = (method: string, path: string) => fetch(BASE + path, { method, headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: method === 'POST' ? 'List-Unsubscribe=One-Click' : undefined });
+  const [p, sig] = t.split('.');
+  const bad = await anon('GET', `/api/email/unsubscribe?t=${p}.${sig.slice(0, -2)}AA`);
+  assert.equal(bad.status, 400);
+  assert.equal((await api('GET', '/api/me/email')).topics.assignedSummary, true); // tamper changed nothing
+  const got = await anon('GET', `/api/email/unsubscribe?t=${encodeURIComponent(t)}`); // no session cookie sent
+  assert.equal(got.status, 200);
+  assert.ok((await got.text()).includes('unsubscribed'));
+  assert.equal((await api('GET', '/api/me/email')).topics.assignedSummary, false);
+  assert.equal((await anon('POST', `/api/email/unsubscribe?t=${encodeURIComponent(t)}`)).status, 200); // one-click, idempotent
+  assert.equal((await api('GET', '/api/me/email')).topics.assignedSummary, false);
+  assert.equal((await anon('POST', `/api/email/resubscribe?t=${encodeURIComponent(t)}`)).status, 200);
+  assert.equal((await api('GET', '/api/me/email')).topics.assignedSummary, true);
+  assert.equal((await api('PUT', '/api/me/email', { assignedSummary: false })).topics.assignedSummary, false);
+  const agentTok = unsubscribeToken('00000000-0000-0000-0000-000000000000', 'assigned_summary');
+  assert.equal((await anon('POST', `/api/email/unsubscribe?t=${encodeURIComponent(agentTok)}`)).status, 200); // unknown account: no-op
+}
+console.log('✓ email prefs: timezone (set-once vs explicit), signed unsubscribe/resubscribe, tamper rejected');
+
 // Isolation: a stranger sees nothing.
 cookie = '';
 await api('POST', '/auth/dev', { email: `mallory-${run}@example.com` });

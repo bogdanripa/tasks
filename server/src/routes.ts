@@ -15,6 +15,7 @@ import * as connectors from './connectors.js';
 import * as values from './projectValues.js';
 import * as alerts from './alerts.js';
 import { watchdogTick } from './watchdog.js';
+import { emailRoutes } from './emailPrefs.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,38}$/, 'lowercase letters, digits and dashes (2–39 chars)');
 const projectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/, 'letter followed by 1–9 letters/digits');
@@ -23,10 +24,11 @@ const skill = z.string().max(31).nullable().optional().describe('skill the work 
 const webhook = z.string().url().nullable().optional().or(z.literal('').transform(() => null));
 
 export function apiRoutes(app: FastifyInstance) {
+  emailRoutes(app);
   // ---- you ----
   route(app, 'GET', '/api/me', { section: 'You', summary: 'your account, organizations and unread count', agent: true }, async (req) => {
     const actor = await requireActor(req);
-    const [me] = await sql`select id, kind, name, email, avatar_url from accounts where id = ${actor.id}`;
+    const [me] = await sql`select id, kind, name, email, avatar_url, timezone from accounts where id = ${actor.id}`;
     const [{ n }] = await sql`select count(*)::int as n from notifications where account_id = ${actor.id} and read_at is null`;
     return { ...me, orgs: await d.listOrgs(actor), unread: n };
   });
