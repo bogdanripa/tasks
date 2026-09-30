@@ -359,6 +359,14 @@ export function SkillsEditor({ value, suggestions, onSave }: { value: string[]; 
   );
 }
 
+function ClockIcon() {
+  return (
+    <svg className="clock-icon" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <circle cx="6" cy="6" r="4.8" /><path d="M6 3.4V6l1.8 1.1" />
+    </svg>
+  );
+}
+
 /**
  * An agent will pick this up soon: counts down the quiet period (people may still be editing), then says
  * "queued" while the agent finishes other work.
@@ -372,14 +380,18 @@ export function StartsSoon({ at, itemRef, agent, onStarted }: { at: string; item
   }, []);
   const left = Math.ceil((new Date(at).getTime() - now) / 1000);
   if (left <= 0 || asked) {
-    return <span className="starting" title="Waiting for the agent to finish its current work">{asked ? 'starting…' : 'queued'}</span>;
+    const text = asked ? 'starting…' : 'queued';
+    const title = asked ? 'Starting now' : 'Waiting for the agent to finish its current work';
+    return <span className="starting" title={title} aria-label={title}><ClockIcon />{text}</span>;
   }
-  const label = `starting in ${left >= 60 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left}s`}`;
+  const label = left >= 60 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left}s`;
+  const title = `Starting in ${label} — an agent will start on this after a short quiet period, so edits you're still making reach it together. Click to start now.`;
   return (
     <button
       type="button"
       className="starting as-button"
-      title="An agent will start on this after a short quiet period, so edits you're still making reach it together. Click to start now."
+      title={title}
+      aria-label={`Starting in ${label} — click to start now`}
       onClick={async (e) => {
         e.stopPropagation(); // the card itself opens the item
         if (!itemRef) return;
@@ -393,7 +405,7 @@ export function StartsSoon({ at, itemRef, agent, onStarted }: { at: string; item
         }
       }}
     >
-      {label}
+      <ClockIcon />{label}
     </button>
   );
 }

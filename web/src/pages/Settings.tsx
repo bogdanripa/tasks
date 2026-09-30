@@ -164,7 +164,7 @@ function EmailSection() {
   return (
     <section>
       <h2>Email</h2>
-      <label className="row-gap" style={{ alignItems: 'center' }}>
+      <label className="check-row">
         <input
           type="checkbox"
           checked={data?.topics.assignedSummary ?? false}
@@ -176,7 +176,7 @@ function EmailSection() {
       <p className="muted small">Sent at 07:00 in your time zone, only when you have open items. Every email also has an unsubscribe link.</p>
       {digest && (
         <>
-          <label className="row-gap" style={{ alignItems: 'center' }}>
+          <label className="check-row">
             <input
               type="checkbox"
               checked={digest.enabled}
@@ -185,7 +185,7 @@ function EmailSection() {
             <span>Daily project changes (06:00)</span>
           </label>
           {digest.projects.map((p) => (
-            <label key={p.id} className="row-gap" style={{ alignItems: 'center', marginLeft: 24 }}>
+            <label key={p.id} className="check-row check-row-indent">
               <input
                 type="checkbox"
                 checked={digest.enabled && p.enabled}
