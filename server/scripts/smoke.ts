@@ -1393,6 +1393,24 @@ assert.equal((await api('GET', `/api/items/${opsIssue.ref}`)).links.length, 0);
 await assert.rejects(mcp(hooked.key.key, 'whoami'), /./);
 console.log('✓ org deletion (owner-only, confirmed, cascades, agents revoked)');
 
+// Email infra (migration 020): timezone column, explicit prefs, once-per-day claims.
+{
+  const [acct] = await db`select id, timezone from accounts limit 1`;
+  assert.equal(acct.timezone, null);
+  await db`update accounts set timezone = 'Europe/Bucharest' where id = ${acct.id}`;
+  await db`insert into email_prefs (account_id, topic, enabled) values (${acct.id}, 'assigned_summary', false)`;
+  await assert.rejects(db`insert into email_prefs (account_id, topic, enabled) values (${acct.id}, 'assigned_summary', true)`, /duplicate key/);
+  await db`insert into email_prefs (account_id, topic, scope, enabled) values (${acct.id}, 'project_digest', 'p1', true)`;
+  await db`insert into email_sends (account_id, topic, local_date, status) values (${acct.id}, 'assigned_summary', '2026-01-01', 'sending')`;
+  const dup = await db`insert into email_sends (account_id, topic, local_date, status) values (${acct.id}, 'assigned_summary', '2026-01-01', 'sending') on conflict do nothing returning 1`;
+  assert.equal(dup.length, 0);
+  await assert.rejects(db`update email_sends set status = 'bogus' where account_id = ${acct.id}`, /check/);
+  await db`delete from email_sends where account_id = ${acct.id}`;
+  await db`delete from email_prefs where account_id = ${acct.id}`;
+  await db`update accounts set timezone = null where id = ${acct.id}`;
+}
+console.log('✓ email tables: timezone, prefs (explicit choice per scope), one claim per user/topic/day');
+
 // Isolation: a stranger sees nothing.
 cookie = '';
 await api('POST', '/auth/dev', { email: `mallory-${run}@example.com` });
