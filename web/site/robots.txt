@@ -1,0 +1,25 @@
+# Mustered: the public pages are for everyone, people and AI crawlers alike.
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /api/
+Disallow: /auth/
+Disallow: /mcp
+
+# AI search and assistants are welcome to read and cite the public pages.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+Allow: /
+Disallow: /app/
+Disallow: /api/
+Disallow: /auth/
+Disallow: /mcp
+
+Sitemap: https://mustered.dev/sitemap.xml

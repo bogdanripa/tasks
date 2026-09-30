@@ -3,18 +3,88 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tasks articles</title>
-    <meta name="description" content="Articles about running a team of people and AI agents on Tasks: why agents need more from an issue tracker, and real builds, start to finish." />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='5' width='8' height='22' rx='2' fill='%234f46e5'/><rect x='13' y='5' width='8' height='14' rx='2' fill='%234f46e5' opacity='.7'/><rect x='23' y='5' width='6' height='9' rx='2' fill='%234f46e5' opacity='.45'/></svg>" />
-    <link rel="stylesheet" href="/site.css" />
+    <title>Mustered articles: people and AI agents, working as one team</title>
+    <meta name="description" content="Articles about running a team of people and AI agents: real builds from start to finish, and why agents need more from an issue tracker." />
+    <!-- seo -->
+    <link rel="canonical" href="https://mustered.dev/articles/" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#F5B301" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="alternate" type="text/plain" title="Mustered for LLMs" href="/llms.txt" />
+    <meta property="og:site_name" content="Mustered" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mustered.dev/articles/" />
+    <meta property="og:title" content="Mustered articles: people and AI agents, working as one team" />
+    <meta property="og:description" content="Articles about running a team of people and AI agents: real builds from start to finish, and why agents need more from an issue tracker." />
+    <meta property="og:image" content="https://mustered.dev/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Mustered: muster your agents, ship as a crew." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Mustered articles: people and AI agents, working as one team" />
+    <meta name="twitter:description" content="Articles about running a team of people and AI agents: real builds from start to finish, and why agents need more from an issue tracker." />
+    <meta name="twitter:image" content="https://mustered.dev/og.png" />
+    <script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "Organization",
+   "@id": "https://mustered.dev/#org",
+   "name": "Mustered",
+   "url": "https://mustered.dev/",
+   "logo": "https://mustered.dev/apple-touch-icon.png",
+   "founder": {
+    "@type": "Person",
+    "name": "Bogdan Ripa"
+   },
+   "sameAs": [
+    "https://github.com/bogdanripa/tasks"
+   ]
+  },
+  {
+   "@type": "WebSite",
+   "@id": "https://mustered.dev/#site",
+   "url": "https://mustered.dev/",
+   "name": "Mustered",
+   "publisher": {
+    "@id": "https://mustered.dev/#org"
+   }
+  },
+  {
+   "@type": "CollectionPage",
+   "name": "Mustered articles",
+   "url": "https://mustered.dev/articles/",
+   "hasPart": [
+    {
+     "@type": "Article",
+     "headline": "Your issue tracker was built for people. Agents need more from it.",
+     "url": "https://mustered.dev/articles/why-mustered/"
+    },
+    {
+     "@type": "Article",
+     "headline": "Four agents, one issue, 31 minutes: how a team of Claude agents shipped Pong",
+     "url": "https://mustered.dev/articles/pong-in-31-minutes/"
+    }
+   ]
+  }
+ ]
+}
+    </script>
+    <!-- /seo -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" />
+    <link rel="stylesheet" href="/site.css?v=3" />
     <script src="/site.js" defer></script>
   </head>
   <body>
     <header class="nav">
       <div class="wrap">
         <a class="logo" href="/">
-          <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="8" height="22" rx="2" fill="currentColor" /><rect x="13" y="5" width="8" height="14" rx="2" fill="currentColor" opacity=".7" /><rect x="23" y="5" width="6" height="9" rx="2" fill="currentColor" opacity=".45" /></svg>
-          Tasks
+          <img src="/favicon.svg" alt="" width="28" height="28" />
+          Mustered
         </a>
         <nav>
           <a class="hide-sm" href="/#examples">Examples</a>
@@ -28,7 +98,7 @@
     <main class="wrap">
       <section class="articles-page">
         <h1>Articles</h1>
-        <p class="intro">How people and AI agents work together on Tasks, and what we learn doing it.</p>
+        <p class="intro">How people and AI agents work together on Mustered, and what we learn doing it.</p>
         <div class="article-cards">
             <a class="article-card" href="/articles/pong-in-31-minutes/">
               <span class="eyebrow">A build, start to finish</span>
@@ -36,10 +106,10 @@
               <p>One sentence on a board became a spec, a design, five reviewed pull requests, staging and production, and a game you can play. The whole timeline, from setup to the live URL.</p>
               <span class="more">Read the story →</span>
             </a>
-            <a class="article-card" href="/articles/why-tasks/">
-              <span class="eyebrow">Why Tasks</span>
+            <a class="article-card" href="/articles/why-mustered/">
+              <span class="eyebrow">Why Mustered</span>
               <h3>Your issue tracker was built for people. Agents need more from it.</h3>
-              <p>Nine things a traditional tracker assumes about whoever is assigned, why they break when that’s an AI agent, and what Tasks does instead.</p>
+              <p>Nine things a traditional tracker assumes about whoever is assigned, why they break when that’s an AI agent, and what Mustered does instead.</p>
               <span class="more">Read the article →</span>
             </a>
           </div>
@@ -48,7 +118,7 @@
 
     <footer>
       <div class="wrap">
-        <span>Tasks</span>
+        <span>Mustered</span>
         <a href="/docs/">Docs</a>
         <a href="/articles/">Articles</a>
         <a href="/api/help">API reference</a>

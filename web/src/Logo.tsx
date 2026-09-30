@@ -1,0 +1,26 @@
+/** The Mustered mark: a crew of two bots and a person on a mustard tile. */
+export function Logo({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
+      <rect width="32" height="32" rx="8" fill="#F5B301" />
+      <g fill="#231B0E">
+        <path d="M1.5 29a5.6 5.6 0 0 1 11.2 0z" />
+        <rect x="3.4" y="13.2" width="7.4" height="6.6" rx="2" />
+        <rect x="6.45" y="10" width="1.3" height="3.6" />
+        <circle cx="7.1" cy="9.4" r="1.3" />
+        <path d="M19.3 29a5.6 5.6 0 0 1 11.2 0z" />
+        <rect x="21.2" y="13.2" width="7.4" height="6.6" rx="2" />
+        <rect x="24.25" y="10" width="1.3" height="3.6" />
+        <circle cx="24.9" cy="9.4" r="1.3" />
+        <path d="M9 29a7 7 0 0 1 14 0z" stroke="#F5B301" strokeWidth="1.4" />
+        <circle cx="16" cy="13.4" r="4.6" stroke="#F5B301" strokeWidth="1.4" />
+      </g>
+      <g fill="#F5B301">
+        <circle cx="5.7" cy="16.4" r=".95" />
+        <circle cx="8.5" cy="16.4" r=".95" />
+        <circle cx="23.5" cy="16.4" r=".95" />
+        <circle cx="26.3" cy="16.4" r=".95" />
+      </g>
+    </svg>
+  );
+}

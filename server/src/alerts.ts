@@ -46,7 +46,7 @@ export async function setTelegram(actor: Actor, input: { botToken: string; chatI
   const token = input.botToken.trim();
   const chatId = input.chatId.trim();
   try {
-    await telegram(token, 'sendMessage', { chat_id: chatId, text: 'Tasks will send you alerts here: stalled work, and questions or tasks agents hand you.' });
+    await telegram(token, 'sendMessage', { chat_id: chatId, text: 'Mustered will send you alerts here: stalled work, and questions or tasks agents hand you.' });
   } catch (e) {
     throw badRequest(`Couldn’t send a test message: ${(e as Error).message}`);
   }

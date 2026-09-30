@@ -131,7 +131,7 @@ export function startDeliveryWorker() {
       return;
     }
     running = true;
-    // One Tasks process delivers at a time (a rolling deploy briefly runs two), or both could start the same run.
+    // One Mustered process delivers at a time (a rolling deploy briefly runs two), or both could start the same run.
     let lock: Awaited<ReturnType<typeof sql.reserve>> | undefined;
     try {
       lock = await sql.reserve();
@@ -142,7 +142,7 @@ export function startDeliveryWorker() {
         return;
       }
       try {
-        await sweepStaleRuns(); // release runs that crashed or never reached Tasks before looking at queues
+        await sweepStaleRuns(); // release runs that crashed or never reached Mustered before looking at queues
         await recoverInterruptedRuns();
         do {
           again = false;

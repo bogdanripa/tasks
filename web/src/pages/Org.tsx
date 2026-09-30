@@ -138,7 +138,7 @@ export function NotConnected({ agent, admin }: { agent: any; admin: boolean }) {
     <span className="not-connected">
       <span className="warn-icon" tabIndex={0} aria-label="Not connected: can’t receive work yet">!</span>
       <span className="tip" role="tooltip">
-        <b>Not connected:</b> can’t receive work yet. Run it in Tasks, or give it a Claude Code routine, a webhook or an API key for the MCP.
+        <b>Not connected:</b> can’t receive work yet. Run it in Mustered, or give it a Claude Code routine, a webhook or an API key for the MCP.
       </span>
       {admin && <Link to={`/agents/${agent.id}`} className="button small">Connect</Link>}
     </span>

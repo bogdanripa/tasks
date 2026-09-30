@@ -12,7 +12,7 @@ import { openConnectors } from './connectors.js';
 import * as values from './projectValues.js';
 
 /**
- * Agents that Tasks runs itself: an LLM with Tasks' own actions as tools, driven by the same payload
+ * Agents that Mustered runs itself: an LLM with Mustered's own actions as tools, driven by the same payload
  * a Claude Code routine gets. Runs are I/O-bound (waiting on the provider), so a few run at once.
  */
 const MAX_CONCURRENT = 3;
@@ -28,7 +28,7 @@ export const inHouseFull = () => draining || active >= MAX_CONCURRENT;
 
 /** Near the step limit, the agent is told to report, and only has the tools that report. */
 const WRAP_UP_STEPS = 3;
-const WRAP_UP_TEXT = '[Tasks] You are almost out of steps:';
+const WRAP_UP_TEXT = '[Mustered] You are almost out of steps:';
 const WRAP_UP_TOOLS = ['comment', 'update_item', 'end_run', 'create_task', 'link_items', 'set_project_value'];
 
 export const REPO_TOOL_NAMES = ['repo_create_branch', 'repo_list_files', 'repo_read_file', 'repo_write_files', 'repo_open_pull_request', 'repo_merge_pull_request', 'repo_publish_pages'];
@@ -399,7 +399,7 @@ async function execute(run: InHouseRun) {
         // Nearly out of steps: report now, with only the tools that report.
         const base = withScreenshots(messages, shots).filter((m: any) => !(m.role === 'user' && typeof m.content === 'string' && m.content.startsWith(WRAP_UP_TEXT)));
         return {
-          messages: [...base, { role: 'user', content: `${WRAP_UP_TEXT} ${left} step${left === 1 ? '' : 's'} left in this run. Stop investigating: comment what you did and found (and what's left), then set the task's status or end the run. Tasks wakes you again when something changes.` }],
+          messages: [...base, { role: 'user', content: `${WRAP_UP_TEXT} ${left} step${left === 1 ? '' : 's'} left in this run. Stop investigating: comment what you did and found (and what's left), then set the task's status or end the run. Mustered wakes you again when something changes.` }],
           activeTools: WRAP_UP_TOOLS,
         };
       },
@@ -519,7 +519,7 @@ export async function recoverInterruptedRuns() {
     if (r.notificationIds.length) {
       await sql`update notifications set delivery_status = 'pending', next_attempt_at = now() where id in ${sql(r.notificationIds.map(Number))}`;
     }
-    await sql`insert into run_steps (run_id, kind, content) values (${r.id}, 'error', ${sql.json({ text: 'The run stopped (Tasks restarted or crashed); the work was queued again.' })})`;
+    await sql`insert into run_steps (run_id, kind, content) values (${r.id}, 'error', ${sql.json({ text: 'The run stopped (Mustered restarted or crashed); the work was queued again.' })})`;
     await releaseRun({ id: r.id, agentId: r.agentId, itemId: null, keyId: r.keyId }, 'stopped by a restart or crash; queued again');
   }
   if (runs.length) console.log(`recovered ${runs.length} interrupted in-house run(s)`);
@@ -540,8 +540,8 @@ export async function drainInHouse(ms: number) {
     if (r.notificationIds.length) {
       await sql`update notifications set delivery_status = 'pending', next_attempt_at = now() where id in ${sql(r.notificationIds.map(Number))}`;
     }
-    await sql`insert into run_steps (run_id, kind, content) values (${r.id}, 'error', ${sql.json({ text: 'Tasks restarted (a deploy) during this run; the work was queued again.' })})`;
-    await releaseRun({ id: r.id, agentId: r.agentId, itemId: null, keyId: r.keyId }, 'Tasks restarted during the run; queued again');
+    await sql`insert into run_steps (run_id, kind, content) values (${r.id}, 'error', ${sql.json({ text: 'Mustered restarted (a deploy) during this run; the work was queued again.' })})`;
+    await releaseRun({ id: r.id, agentId: r.agentId, itemId: null, keyId: r.keyId }, 'Mustered restarted during the run; queued again');
   }
   console.log(`drained: queued ${runs.length} in-house run(s) again`);
 }

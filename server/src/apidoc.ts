@@ -98,7 +98,7 @@ function routes() {
 /** Detailed, human- and agent-readable reference (GET /api/help). */
 export function fullReference(baseUrl: string) {
   const out = [
-    'Tasks REST API (generated from the running server)',
+    'Mustered REST API (generated from the running server)',
     '',
     `Base URL: ${baseUrl}`,
     'Auth: Authorization: Bearer <API key or run token>. The web app uses a session cookie instead.',

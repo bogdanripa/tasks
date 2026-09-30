@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { itemPath } from '../api';
 import { ErrorNote, Markdown, Time, useFetch } from '../ui';
 
-/** Transcript of a run Tasks executed itself: the assignment, what the model said, and each tool call and result. */
+/** Transcript of a run Mustered executed itself: the assignment, what the model said, and each tool call and result. */
 export default function RunPage() {
   const { id } = useParams();
   const { data, error, reload } = useFetch<{ run: any; steps: any[] }>(`/api/runs/${id}`);
@@ -40,7 +40,7 @@ export default function RunPage() {
             return (
               <li key={s.id} className="step collapsible">
                 <details>
-                  <summary>{s.kind === 'system' ? 'Instructions' : 'Assignment from Tasks'}</summary>
+                  <summary>{s.kind === 'system' ? 'Instructions' : 'Assignment from Mustered'}</summary>
                   <pre>{s.content.text}</pre>
                 </details>
               </li>

@@ -1,38 +1,43 @@
+/* Mustered: mustard and ink, a pickle-teal for the bots and a ketchup red for issues. */
 :root {
-  --bg: #f4f5f7;
+  --bg: #fcf8ee;
   --surface: #ffffff;
-  --surface-2: #ebecf0;
-  --column: #eef0f3;
-  --border: #dfe1e6;
-  --text: #172033;
-  --muted: #6b7280;
-  --accent: #4f46e5;
-  --accent-soft: #eef2ff;
-  --agent: #0d9488;
-  --agent-soft: #ccfbf1;
-  --issue: #d97706;
-  --task: #4f46e5;
-  --danger: #dc2626;
-  --ok: #16a34a;
-  --shadow: 0 1px 2px rgb(15 23 42 / 0.08), 0 1px 1px rgb(15 23 42 / 0.04);
-  --radius: 8px;
+  --surface-2: #f4ecd6;
+  --column: #f5eedb;
+  --border: #e6dbbd;
+  --text: #231b0e;
+  --muted: #6f6450;
+  --accent: #9a5f00;
+  --accent-soft: #fff0bf;
+  --brand: #f5b301;
+  --brand-ink: #231b0e;
+  --agent: #0f8a7e;
+  --agent-soft: #d6f5ef;
+  --issue: #d9432b;
+  --task: #9a5f00;
+  --danger: #c62828;
+  --ok: #2e7d32;
+  --shadow: 0 1px 2px rgb(35 27 14 / 0.08), 0 1px 1px rgb(35 27 14 / 0.04);
+  --radius: 10px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1218;
-    --surface: #181c24;
-    --surface-2: #222733;
-    --column: #151920;
-    --border: #2b3140;
-    --text: #e5e7eb;
-    --muted: #9099a8;
-    --accent: #818cf8;
-    --accent-soft: #232650;
-    --agent: #2dd4bf;
-    --agent-soft: #123b37;
-    --issue: #f59e0b;
-    --task: #818cf8;
+    --bg: #14110a;
+    --surface: #1e1a10;
+    --surface-2: #2a2415;
+    --column: #19160d;
+    --border: #3b331e;
+    --text: #f4ecd8;
+    --muted: #b3a88c;
+    --accent: #ffc62e;
+    --accent-soft: #3a2f0e;
+    --brand: #f5b301;
+    --brand-ink: #231b0e;
+    --agent: #3fd6c3;
+    --agent-soft: #113630;
+    --issue: #ff7a5c;
+    --task: #ffc62e;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
     color-scheme: dark;
   }
@@ -73,7 +78,8 @@ button, .button {
   white-space: nowrap;
 }
 button:hover, .button:hover { background: var(--surface-2); text-decoration: none; }
-button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+button.primary, .button.primary { background: var(--brand); border-color: var(--brand-ink); color: var(--brand-ink); font-weight: 700; box-shadow: 2px 2px 0 var(--brand-ink); }
+button.primary:active, .button.primary:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--brand-ink); }
 button.primary:hover, .button.primary:hover { filter: brightness(1.08); }
 button.ghost { background: transparent; border-color: transparent; }
 button.ghost:hover { background: var(--surface-2); }
@@ -112,7 +118,9 @@ textarea.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
   padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 10;
 }
-.logo { display: flex; align-items: center; gap: 7px; font-weight: 700; color: var(--accent); font-size: 16px; }
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 800; color: var(--text); font-size: 18px; font-family: 'Bricolage Grotesque', sans-serif; letter-spacing: -0.01em; }
+.logo svg { border-radius: 7px; transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
+.logo:hover svg { transform: rotate(-10deg) scale(1.08); }
 .logo:hover { text-decoration: none; }
 .pickers { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .pickers .sep { color: var(--muted); opacity: 0.6; }
@@ -133,7 +141,7 @@ textarea.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 .search { flex: 1; max-width: 420px; margin-left: auto; }
 .search input { padding: 5px 10px; background: var(--bg); }
 .inbox-link { color: var(--text); display: flex; align-items: center; gap: 6px; }
-.count { background: var(--accent); color: white; border-radius: 10px; font-size: 11px; padding: 0 7px; font-weight: 600; }
+.count { background: var(--brand); color: var(--brand-ink); border-radius: 10px; font-size: 11px; padding: 0 7px; font-weight: 600; }
 .me { display: flex; }
 
 .page { padding: 24px; max-width: 1200px; margin: 0 auto; }
@@ -388,7 +396,8 @@ pre.code { background: var(--surface-2); padding: 10px; border-radius: 6px; over
 /* login */
 .login { display: grid; place-items: center; min-height: 100vh; padding: 16px; }
 .login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 32px; width: min(380px, 100%); display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow); }
-.login-card h1 { font-size: 26px; color: var(--accent); }
+.login-card h1 { font-size: 34px; color: var(--text); display: flex; align-items: center; gap: 10px; }
+.login-card { border: 2px solid var(--brand-ink); box-shadow: 6px 6px 0 var(--brand); }
 .login-card p { margin: 0; }
 .google { justify-content: center; padding: 10px; }
 .dev-login { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 14px; }
@@ -445,7 +454,7 @@ code.inherited { margin-right: 6px; }
 .switch-row input { position: absolute; opacity: 0; pointer-events: none; }
 .switch { width: 32px; height: 18px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); position: relative; flex: none; transition: background 0.15s; }
 .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); transition: transform 0.15s; }
-.switch-row.on .switch { background: var(--accent); border-color: var(--accent); }
+.switch-row.on .switch { background: var(--brand); border-color: var(--brand-ink); }
 .switch-row.on .switch::after { transform: translateX(14px); }
 .switch-row input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
 .connectors-own { margin-top: 12px; }
@@ -489,3 +498,8 @@ code.inherited { margin-right: 6px; }
 .live-run { margin: 0 0 12px; padding: 8px 10px; border-radius: 6px; background: var(--agent-soft); }
 .assignee.as-link { text-decoration: none; color: inherit; border-radius: 10px; }
 .assignee.as-link:hover .assignee-name, .assignee.as-link:hover { text-decoration: underline; }
+
+/* Mustered: headings in a friendlier face */
+h1, h2, .board-head h1, .column header h3 { font-family: 'Bricolage Grotesque', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; letter-spacing: -0.01em; }
+h1 { font-weight: 800; }
+::selection { background: var(--brand); color: var(--brand-ink); }

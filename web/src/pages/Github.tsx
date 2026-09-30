@@ -14,7 +14,7 @@ type OrgGithub = {
   manageUrl?: string;
 };
 
-/** Org settings tab: install the Tasks GitHub App and see which repositories it reaches. */
+/** Org settings tab: install the Mustered GitHub App and see which repositories it reaches. */
 export function GithubSection({ org }: { org: string }) {
   const { data, error, reload } = useFetch<OrgGithub>(`/api/orgs/${org}/github`);
   if (error) return <ErrorNote error={error} />;
@@ -34,7 +34,7 @@ export function GithubSection({ org }: { org: string }) {
     return (
       <div className="stack">
         <p className="muted small">
-          Connect the Tasks GitHub App and choose the repositories agents may work on. Then pick a repository in each project’s settings.
+          Connect the Mustered GitHub App and choose the repositories agents may work on. Then pick a repository in each project’s settings.
           Every agent run gets a token limited to that one repository, valid for an hour.
         </p>
         {picks.length > 0 ? (
@@ -53,12 +53,12 @@ export function GithubSection({ org }: { org: string }) {
           <div className="github-connect">
             <div>
               <a className="button primary" href={install}>Install on GitHub</a>
-              <p className="muted small">For a GitHub account or organization that doesn’t have the Tasks app yet.</p>
+              <p className="muted small">For a GitHub account or organization that doesn’t have the Mustered app yet.</p>
             </div>
             <div>
               <a className="button" href={`${install}?existing=1`}>Use an existing installation</a>
               <p className="muted small">
-                The app is already installed (for example, for another Tasks organization). GitHub allows one installation per account, so
+                The app is already installed (for example, for another Mustered organization). GitHub allows one installation per account, so
                 sign in with GitHub and use it here too.
               </p>
             </div>
@@ -167,7 +167,7 @@ export function RepositorySection({ org, projectKey, project, onSaved }: { org: 
       }}
     >
       <p className="muted small">
-        The repository agents work in for this project. Agents that Tasks runs get repository tools; Claude Code routines get a clone URL
+        The repository agents work in for this project. Agents that Mustered runs get repository tools; Claude Code routines get a clone URL
         with a token limited to this repository. Reviews, who merges, and the staging and production URLs belong in the project’s{' '}
         <b>Guidelines</b>.
       </p>

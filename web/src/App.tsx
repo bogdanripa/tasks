@@ -1,3 +1,4 @@
+import { Logo } from './Logo';
 import ValuesPage from './pages/Values';
 import { Toaster } from './toast';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -163,12 +164,8 @@ function TopBar({ me }: { me: Me }) {
   return (
     <header className="topbar">
       <Link to="/" className="logo">
-        <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden>
-          <rect x="3" y="5" width="8" height="22" rx="2" fill="currentColor" />
-          <rect x="13" y="5" width="8" height="14" rx="2" fill="currentColor" opacity=".7" />
-          <rect x="23" y="5" width="6" height="9" rx="2" fill="currentColor" opacity=".45" />
-        </svg>
-        Tasks
+        <Logo />
+        Mustered
       </Link>
       <div className="pickers">
         <Dropdown label={org?.name ?? null} placeholder="Organization">
