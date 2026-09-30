@@ -11,7 +11,8 @@
     "smoke:mailer": "tsx scripts/mailer-smoke.ts",
     "smoke:email-prefs": "tsx scripts/email-prefs-smoke.ts",
     "smoke:scheduler": "tsx scripts/mailscheduler-smoke.ts",
-    "smoke:digest": "tsx scripts/project-digest-smoke.ts"
+    "smoke:digest": "tsx scripts/project-digest-smoke.ts",
+    "smoke:assignment-mail": "tsx scripts/assignment-mail-smoke.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.62",
