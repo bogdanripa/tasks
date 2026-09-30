@@ -329,7 +329,8 @@ li.done .grow, li.done .title { text-decoration: line-through; color: var(--mute
 .actions .grow-left { margin-right: auto; }
 
 .check-row { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
-.check-row input { width: auto; }
+.check-row input { width: auto; flex: none; }
+.check-row-indent { margin-left: 24px; }
 .schedules li { align-items: flex-start; }
 .schedules li.paused { opacity: 0.6; }
 .schedules .avatar { vertical-align: -2px; }
