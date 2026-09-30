@@ -230,7 +230,7 @@ Tasks can email people: a daily summary of the open items assigned to them (07:0
 - **At most one email per person per topic per local day**, recorded in `email_sends`, so restarts and overlapping deploys can't double-send. A failed send is logged and retried every tick until the window ends.
 - **Unsubscribe:** every email carries a signed, login-free link (and `List-Unsubscribe` headers, RFC 8058 one-click). Tokens are HMACs derived from `SECRETS_KEY`, so rotating that key invalidates old links. People can also toggle it in Settings.
 - **Project changes digest (TAS-22):** opt-in, 06:00 local, sent to org owners/admins for the projects they own, only when something changed; per-project and global unsubscribe (design in `specs/TAS-22.md`).
-- **Before credentials exist:** leave `EMAIL_TRANSPORT` unset; the mail shows up in the log instead of an inbox.
+- **Before credentials exist:** leave `EMAIL_TRANSPORT` unset; the mail shows up in the log instead of an inbox.  `npm run smoke:mailer -w server` checks the mailer with no server or database.
 
 ### Staging and production
 
