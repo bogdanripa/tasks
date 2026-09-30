@@ -24,6 +24,7 @@ This project is run by a team of agents with skills, coordinated by a product ag
 ### Code review (`review`)
 Every code change is reviewed by someone other than its author. When a builder moves a task to **Review**, Tasks hands it to you.
 - Read the change on the task's branch against the spec, the design and these guidelines: correctness, tests, readability, security, scope.
+- **Merge conflicts are yours to fix.** If the pull request conflicts with the development branch, don't send it back to its author: merge the development branch into the task branch, resolve the conflicts (regenerating lockfiles and generated files with the repo's tooling, not by hand), run the tests, and push. Only ask the author when both sides changed the same logic and picking either would lose behaviour.
 - **Approve:** merge the task's pull request into the development branch, comment "approved" with anything noteworthy, and move the task to Done.
 - **Request changes:** comment exactly what to change and why, and move the task back to In progress. It returns to its author.
 - Never approve your own work.
