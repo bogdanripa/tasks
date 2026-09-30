@@ -429,6 +429,33 @@ const orgOnLate = (await api('GET', `/api/orgs/${org}`)).members.find((m: any) =
 assert.equal(orgOnLate.activeRun, null);
 assert.equal(orgOnLate.queuedUpdates, 0);
 console.log('✓ org page: an idle agent shows no active run and no queued updates');
+// Org page: humans list their open assigned work — at most 5 (newest updated first) plus the exact total; done excluded.
+{
+  const aliceId = (await api('GET', '/api/me')).account?.id ?? (await api('GET', '/api/me')).id;
+  const humanOf = async () => (await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === aliceId);
+  const base = (await humanOf()).assigned;
+  assert.equal(typeof base.total, 'number');
+  const made: any[] = [];
+  for (let i = 0; i < 6; i++) {
+    made.push(await api('POST', `/api/projects/${org}/API/items`, { type: 'issue', title: `Human work ${i}`, status: 'Todo', assignee: aliceId }));
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  const six = await humanOf();
+  assert.equal(six.assigned.total, base.total + 6);
+  assert.equal(six.assigned.items.length, 5);
+  assert.equal(six.assigned.items[0].ref, made[5].ref, 'newest updated first');
+  assert.equal(six.assigned.items[0].projectName, 'Backend');
+  await api('PATCH', `/api/items/${made[5].ref}`, { status: 'Done' });
+  const after = await humanOf();
+  assert.equal(after.assigned.total, base.total + 5, 'done items are not counted');
+  assert.ok(!after.assigned.items.some((i: any) => i.ref === made[5].ref), 'done items are not listed');
+  for (const m of made.slice(0, 5)) await api('PATCH', `/api/items/${m.ref}`, { status: 'Done' });
+  const back = await humanOf();
+  assert.equal(back.assigned.total, base.total);
+  assert.ok(back.assigned.items.length <= 5);
+  assert.equal((await api('GET', `/api/orgs/${org}`)).members.find((m: any) => m.id === late.agent.id).assigned ?? null, null, 'agents carry no assigned block');
+  console.log('✓ org page: humans list up to 5 open assigned items plus the total; done excluded');
+}
 const lateItem = await api('POST', `/api/projects/${org}/WEB/items`, { type: 'issue', title: 'Waiting for its agent', status: 'Todo', assignee: late.agent.id });
 await new Promise((r) => setTimeout(r, 1500));
 const before = fires.length;
