@@ -229,6 +229,7 @@ Tasks can email people: a daily summary of the open items assigned to them (07:0
 - **Scheduler:** runs in the server, once a minute. Each person has a time zone (set from their browser the first time they use the app; changeable in Settings). Someone with no time zone yet gets nothing until they have opened the app once.
 - **At most one email per person per topic per local day**, recorded in `email_sends`, so restarts and overlapping deploys can't double-send. A failed send is logged and retried every tick until the window ends.
 - **Unsubscribe:** every email carries a signed, login-free link (and `List-Unsubscribe` headers, RFC 8058 one-click). Tokens are HMACs derived from `SECRETS_KEY`, so rotating that key invalidates old links. People can also toggle it in Settings.
+- **Project changes digest (TAS-22):** opt-in, 06:00 local, sent to org owners/admins for the projects they own, only when something changed; per-project and global unsubscribe (design in `specs/TAS-22.md`).
 - **Before credentials exist:** leave `EMAIL_TRANSPORT` unset; the mail shows up in the log instead of an inbox.
 
 ### Staging and production
