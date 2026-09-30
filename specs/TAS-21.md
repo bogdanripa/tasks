@@ -67,7 +67,7 @@ sendEmail(e: Email): Promise<void>                       // picks the transport 
 
 - `EMAIL_TRANSPORT=log` (the default while nothing is configured): writes the full email to the server log and succeeds. This is what lets TAS-21 and TAS-22 be verified before TAS-30 delivers credentials.
 - `EMAIL_TRANSPORT=smtp`: `nodemailer` with `SMTP_URL` (`smtps://user:pass@host:465`). SMTP is offered by every provider (SES, SendGrid, Postmark, Resend, Mailgun, Gmail), so no provider SDK is coupled in. Adding an HTTP-API transport later is one more class implementing `Transport`.
-- `EMAIL_FROM` (e.g. `Tasks <noreply@…>`) required for `smtp`. A misconfigured `smtp` transport fails at first send with a clear error, never at boot (the server must boot without credentials).
+- `EMAIL_FROM` (e.g. `Mustered <noreply@…>`) required for `smtp`. A misconfigured `smtp` transport fails at first send with a clear error, never at boot (the server must boot without credentials).
 - Every message from this module carries `List-Unsubscribe` (`<https://…/api/email/unsubscribe?t=…>` and, for one-click, `List-Unsubscribe-Post: List-Unsubscribe=One-Click`) — callers pass the token, the mailer does not guess the topic.
 
 ### Unsubscribe tokens and endpoints (`server/src/emailPrefs.ts`)

@@ -58,7 +58,7 @@ export function emailAssignment(
       ].join('\n');
       const html = `<p>${esc(assigner)} assigned you <b>${esc(item.ref)}</b>: ${esc(item.title)}</p>
 <ul>${lines.map(([k, v]) => `<li>${esc(k)}: ${esc(v)}</li>`).join('')}</ul>
-${note ? `<p>${esc(note)}</p>` : ''}<p><a href="${esc(url)}">Open it in Tasks</a></p>`;
+${note ? `<p>${esc(note)}</p>` : ''}<p><a href="${esc(url)}">Open it in Mustered</a></p>`;
       await sendEmail({ to: who.email, subject: `${assigner} assigned you ${item.ref}: ${item.title}`, text, html });
     } catch (err) {
       console.error('assignment email failed', { ref, to: assigneeId, error: err instanceof Error ? err.message : String(err) });

@@ -52,5 +52,5 @@ export async function sendEmail(e: Email & { unsubscribeUrl?: string }): Promise
     headers['List-Unsubscribe'] = `<${unsubscribeUrl}>`;
     headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
   }
-  await transport().send({ ...email, headers, from: from || 'Tasks <noreply@localhost>' });
+  await transport().send({ ...email, headers, from: from || 'Mustered <noreply@localhost>' });
 }
