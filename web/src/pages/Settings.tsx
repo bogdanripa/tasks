@@ -129,18 +129,34 @@ function AlertsSection() {
 /** The daily assigned-items summary: on/off and the time zone its 07:00 is measured in. */
 function EmailSection() {
   const { refreshMe } = useSession();
-  const { data, reload } = useFetch<{ timezone: string | null; topics: { assignedSummary: boolean } }>('/api/me/email');
+  const { data, reload } = useFetch<{
+    timezone: string | null;
+    topics: {
+      assignedSummary: boolean;
+      projectDigest?: { enabled: boolean; projects: { id: string; orgSlug: string; key: string; name: string; enabled: boolean }[] };
+    };
+  }>('/api/me/email');
   const [tz, setTz] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const zones: string[] = (Intl as any).supportedValuesOf?.('timeZone') ?? [];
   const shown = tz ?? data?.timezone ?? '';
-  const save = async (body: { timezone?: string; assignedSummary?: boolean }) => {
+  const save = async (body: { timezone?: string; assignedSummary?: boolean; projectDigest?: boolean }) => {
     setError(null);
     try {
       await api('PUT', '/api/me/email', body, { toast: 'Saved' });
       setTz(null);
       reload();
       refreshMe();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const digest = data?.topics.projectDigest;
+  const saveProject = async (id: string, enabled: boolean) => {
+    setError(null);
+    try {
+      await api('PUT', `/api/me/email/projects/${id}`, { enabled }, { toast: 'Saved' });
+      reload();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -158,6 +174,32 @@ function EmailSection() {
         <span>Daily summary of my open assigned items</span>
       </label>
       <p className="muted small">Sent at 07:00 in your time zone, only when you have open items. Every email also has an unsubscribe link.</p>
+      {digest && (
+        <>
+          <label className="row-gap" style={{ alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={digest.enabled}
+              onChange={(e) => save({ projectDigest: e.target.checked })}
+            />
+            <span>Daily project changes (06:00)</span>
+          </label>
+          {digest.projects.map((p) => (
+            <label key={p.id} className="row-gap" style={{ alignItems: 'center', marginLeft: 24 }}>
+              <input
+                type="checkbox"
+                checked={digest.enabled && p.enabled}
+                disabled={!digest.enabled}
+                onChange={(e) => saveProject(p.id, e.target.checked)}
+              />
+              <span>{p.name} <span className="muted small">({p.orgSlug}/{p.key})</span></span>
+            </label>
+          ))}
+          <p className="muted small">
+            Sent at 06:00 in the time zone below, only when something changed, for projects in organizations you own or administer. Turning the master switch on subscribes you to all of them.
+          </p>
+        </>
+      )}
       <form
         className="row-gap"
         style={{ alignItems: 'end' }}
