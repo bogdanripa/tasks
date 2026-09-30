@@ -217,15 +217,15 @@ function Card({ item, dragging, onDragStart, onDragEnd }: { item: Item; dragging
       <div className="card-title">{item.title}</div>
       <div className="card-meta">
         {!!item.tasksTotal && (
-          <span className={`pill ${item.tasksDone === item.tasksTotal ? 'complete' : ''}`} title="Tasks done">
+          <span className={`pill ${item.tasksDone === item.tasksTotal ? 'complete' : ''}`} title={`${item.tasksDone} of ${item.tasksTotal} tasks done`}>
             ☑ {item.tasksDone}/{item.tasksTotal}
           </span>
         )}
-        {!!item.linkCount && <span className="pill" title="Links">⇄ {item.linkCount}</span>}
+        {!!item.linkCount && <span className="pill" title={`${item.linkCount} linked item${item.linkCount === 1 ? '' : 's'}`}>⇄ {item.linkCount}</span>}
         {item.working && <Working run={item.workingRun} />}
         {!item.working && item.startsAt && !item.blockedBy?.length && !item.done && <StartsSoon at={item.startsAt} itemRef={item.ref} agent={item.assigneeName} />}
         {item.skill && !item.assigneeName && !item.done && <SkillChip skill={item.skill} missing />}
-        {!item.working && !!item.blockedBy?.length && !item.done && <span className="pill" title={`Waiting on ${item.blockedBy.join(', ')}`}>⏸ blocked</span>}
+        {!item.working && !!item.blockedBy?.length && !item.done && <span className="pill" title={`Blocked — waiting on ${item.blockedBy.join(', ')} to finish`}>⏸ blocked</span>}
         <span className="spacer" />
         {item.assigneeName && item.assigneeKind === 'agent' && item.assigneeId ? (
           // An agent: open what it's doing (the live run) or has done (its activity).
