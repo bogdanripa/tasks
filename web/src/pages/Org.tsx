@@ -68,6 +68,20 @@ export default function OrgPage() {
                 <span>{m.name}</span>
                 <span className="role">{m.role}</span>
                 {m.id === me.id && <button className="ghost small" onClick={leave}>Leave</button>}
+                {m.assigned?.items?.length > 0 && (
+                  <div className="agent-activity assigned-work">
+                    <ul>
+                      {m.assigned.items.map((i: any) => (
+                        <li key={i.ref}>
+                          <ItemLine refStr={i.ref} title={i.title} parent={i.parentRef && { ref: i.parentRef, title: i.parentTitle }} project={i.projectName} />
+                        </li>
+                      ))}
+                    </ul>
+                    {m.assigned.total > m.assigned.items.length && (
+                      <Link to={`/?assignee=${encodeURIComponent(m.id)}`}>and {m.assigned.total - m.assigned.items.length} more</Link>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -88,11 +102,7 @@ export default function OrgPage() {
                   <div className="agent-activity">
                     <Working run={m.activeRun.id} />
                     <span>
-                      on <RefLink refStr={m.activeRun.itemRef} /> {m.activeRun.itemTitle}
-                      {m.activeRun.parent && (
-                        <> · for issue <RefLink refStr={m.activeRun.parent.ref} /> {m.activeRun.parent.title}</>
-                      )}
-                      {' · '}{projectName(m.activeRun.projectKey)}
+                      on <ItemLine refStr={m.activeRun.itemRef} title={m.activeRun.itemTitle} parent={m.activeRun.parent} project={projectName(m.activeRun.projectKey)} />
                       {' · '}started <Time iso={m.activeRun.startedAt} />
                     </span>
                   </div>
@@ -129,6 +139,17 @@ export default function OrgPage() {
         />
       )}
     </div>
+  );
+}
+
+/** One item as shown under a member: ref, title, parent issue (for tasks) and project. */
+function ItemLine({ refStr, title, parent, project }: { refStr: string; title: string; parent?: { ref: string; title: string } | null; project: string }) {
+  return (
+    <>
+      <RefLink refStr={refStr} /> {title}
+      {parent && <> · for issue <RefLink refStr={parent.ref} /> {parent.title}</>}
+      {' · '}{project}
+    </>
   );
 }
 
