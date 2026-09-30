@@ -9,6 +9,7 @@
     "seed": "tsx scripts/seed.ts",
     "smoke": "tsx scripts/smoke.ts",
     "smoke:mailer": "tsx scripts/mailer-smoke.ts",
+    "smoke:email-prefs": "tsx scripts/email-prefs-smoke.ts",
     "smoke:scheduler": "tsx scripts/mailscheduler-smoke.ts"
   },
   "dependencies": {
