@@ -134,7 +134,7 @@ async function confirmPage(t: string, topic: string, scope: string, on: boolean)
   const action = on ? 'unsubscribe' : 'resubscribe';
   const msg = on ? `You'll get ${what} again.` : `You're unsubscribed from ${what}.`;
   const other = on ? 'Unsubscribe' : 'Re-subscribe';
-  return page(on ? 'Re-subscribed' : "You're unsubscribed", `<p>${esc(msg)}</p><form method="post" action="/api/email/${action}?t=${encodeURIComponent(t)}"><button>${other}</button></form><p><a href="${esc(config.publicUrl)}/app/">Open Tasks</a> · change this any time in Settings.</p>`);
+  return page(on ? 'Re-subscribed' : "You're unsubscribed", `<p>${esc(msg)}</p><form method="post" action="/api/email/${action}?t=${encodeURIComponent(t)}"><button>${other}</button></form><p><a href="${esc(config.publicUrl)}/app/">Open Mustered</a> · change this any time in Settings.</p>`);
 }
 
 export function emailRoutes(app: FastifyInstance) {

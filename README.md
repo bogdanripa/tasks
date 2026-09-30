@@ -223,7 +223,7 @@ In Settings → Email, the project changes digest has a master toggle (off by de
 | Env | |
 | --- | --- |
 | `EMAIL_TRANSPORT` | `log` (default: emails are written to the server log, nothing is sent) or `smtp` |
-| `EMAIL_FROM` | sender for `smtp`, e.g. `Tasks <noreply@example.com>` |
+| `EMAIL_FROM` | sender for `smtp`, e.g. `Mustered <noreply@example.com>` |
 | `SMTP_URL` | for `smtp`, e.g. `smtps://user:pass@smtp.example.com:465`. Any provider that offers SMTP works |
 | `EMAIL_TICK_SECONDS` | how often the scheduler looks for people whose send time has come (default 60) |
 | `EMAIL_WINDOW_HOURS` | how long after the send time a failed email is retried (default 6) |
