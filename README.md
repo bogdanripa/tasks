@@ -214,6 +214,23 @@ The image is built for `linux/arm64`. It listens on `:80` on IPv4 and IPv6 and e
 
 Keep the app always on (`sleep_when_idle: false`). Webhook retries and agent long-polls need a live process.
 
+### Email (daily summaries)
+
+Tasks can email people: a daily summary of the open items assigned to them (07:00 local, TAS-21) and, later, a project changes digest (TAS-22). Both use one mailer, one scheduler and one unsubscribe mechanism (`mailer.ts`, `mailScheduler.ts`, `emailPrefs.ts`; design in `specs/TAS-21.md`).
+
+| Env | |
+| --- | --- |
+| `EMAIL_TRANSPORT` | `log` (default: emails are written to the server log, nothing is sent) or `smtp` |
+| `EMAIL_FROM` | sender for `smtp`, e.g. `Tasks <noreply@example.com>` |
+| `SMTP_URL` | for `smtp`, e.g. `smtps://user:pass@smtp.example.com:465`. Any provider that offers SMTP works |
+| `EMAIL_TICK_SECONDS` | how often the scheduler looks for people whose send time has come (default 60) |
+| `EMAIL_WINDOW_HOURS` | how long after the send time a failed email is retried (default 6) |
+
+- **Scheduler:** runs in the server, once a minute. Each person has a time zone (set from their browser the first time they use the app; changeable in Settings). Someone with no time zone yet gets nothing until they have opened the app once.
+- **At most one email per person per topic per local day**, recorded in `email_sends`, so restarts and overlapping deploys can't double-send. A failed send is logged and retried every tick until the window ends.
+- **Unsubscribe:** every email carries a signed, login-free link (and `List-Unsubscribe` headers, RFC 8058 one-click). Tokens are HMACs derived from `SECRETS_KEY`, so rotating that key invalidates old links. People can also toggle it in Settings.
+- **Before credentials exist:** leave `EMAIL_TRANSPORT` unset; the mail shows up in the log instead of an inbox.
+
 ### Staging and production
 
 - **Production:** `tasks` — https://tasks-coolify.bogdanripa.com — deploys from `main`.
