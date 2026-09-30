@@ -22,3 +22,21 @@ assert.equal(readToken(unsubscribeToken(id, 'nonsense')), null);
 assert.ok(unsubscribeUrl(t).includes('/api/email/unsubscribe?t='));
 assert.ok(validTimezone('Europe/Bucharest') && !validTimezone('Mars/Base'));
 console.log('✓ unsubscribe tokens (roundtrip, tamper rejected, url) and timezone validation');
+
+// Through the real route() wrapper — the pure checks above can't catch a handler-signature mistake
+// (TAS-48: handlers took (req, reply) while route() passes (req, input, reply), so every call was a 500).
+// Invalid-token paths need no database; valid-token paths are covered on staging.
+const { default: Fastify } = await import('fastify');
+const { emailRoutes } = await import('../src/emailPrefs.js');
+const app = Fastify();
+emailRoutes(app);
+for (const [method, url] of [['GET', '/api/email/unsubscribe'], ['POST', '/api/email/unsubscribe'], ['POST', '/api/email/resubscribe']] as const) {
+  for (const q of ['', '?t=abc.def']) {
+    const res = await app.inject({ method, url: url + q });
+    assert.equal(res.statusCode, 400, `${method} ${url}${q}`);
+    assert.match(res.headers['content-type'] as string, /text\/html/);
+    assert.match(res.body, /Invalid link/);
+  }
+}
+await app.close();
+console.log('✓ email routes reject invalid tokens with 400 through route()');
