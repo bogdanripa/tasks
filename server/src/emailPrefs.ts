@@ -95,7 +95,7 @@ export function emailRoutes(app: FastifyInstance) {
     return tok;
   }
   const bad = (reply: any) => reply.code(400).type('text/html').send(page('Invalid link', '<p>This link is not valid, so nothing was changed.</p>'));
-  const handler = (enabled: boolean, html: boolean) => async (req: any, reply: any) => {
+  const handler = (enabled: boolean, html: boolean) => async (req: any, _input: unknown, reply: any) => {
     const t = (req.query as { t?: string }).t;
     const tok = await apply(t, enabled);
     if (!tok) return bad(reply);
