@@ -7,9 +7,9 @@ the projects they own since the last summary. Users can unsubscribe per project 
 
 ## User-facing behaviour
 
-- **Who:** human users (not agents) who own at least one project and are subscribed.
-- **Owner:** the human who created the project (as `projectOwner()` in `domain.ts` resolves it; falls
-  back to an org owner if the creator has left). See open question 1.
+- **Who:** human users (not agents) who own at least one project and have opted in.
+- **Owner:** every **org owner and admin** of the org the project belongs to (decided by Bogdan Ripa in
+  TAS-24). Agents and plain members are never recipients.
 - **When:** once a day at 06:00 in the user's time zone (same per-user time zone setting as TAS-21).
 - **What:** for each owned project with changes since the previous summary, grouped by project: the
   events from the project's event log (items created, status changes, assignments, comments, items
@@ -23,14 +23,14 @@ the projects they own since the last summary. Users can unsubscribe per project 
   (one-click = all). Links are signed tokens, need no login, and are not guessable. The app's settings
   page lists the user's owned projects with a toggle each, plus a master toggle, so they can
   re-subscribe.
-- Subscribed by default (see open question 2).
+- **Opt-in:** nobody receives the summary until they enable it (decided in TAS-24). Settings page has a master toggle plus a toggle per owned project; enabling the master toggle subscribes to all owned projects, and each project can then be switched off. Emails also carry the unsubscribe links above.
 
 ## Acceptance criteria
 
-1. An owner of a project with changes since the last summary gets one email at ~06:00 local time listing them.
+1. An org owner/admin who has opted in, and whose org has a project with changes since the last summary gets one email at ~06:00 local time listing them.
 2. No changes in any owned project: no email.
 3. Only projects the user owns appear; only events in those projects.
-4. Users in different time zones get theirs at their own 06:00.
+4. Users who have not opted in get nothing. Users in different time zones get theirs at their own 06:00.
 5. No duplicate email for the same user and local date; no event appears in two summaries.
 6. Per-project unsubscribe removes that project from later emails and leaves the others; unsubscribe-all
    stops all emails. Both work without signing in and can be reverted in settings.
@@ -49,8 +49,8 @@ Shares email delivery, the per-user time zone setting and the daily scheduler wi
 infrastructure once (under TAS-21) and reuse it here; this issue adds the change digest and the
 per-project subscription.
 
-## Open questions
+## Decisions (from TAS-24)
 
-1. "Projects they own": the creator (as above), or all org owners/admins?
-2. Opt-out (subscribed by default) as assumed here, or opt-in?
-3. Email provider/credentials: being asked under TAS-21 (TAS-23).
+1. Owners = all org owners/admins.
+2. Opt-in (unlike TAS-21, which is subscribed by default).
+3. Email provider and credentials: Bogdan will provide them later; tracked in a separate task (see the issue comments). Time zone: per-user, inferred from the browser at account creation (TAS-23).
