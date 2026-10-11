@@ -32,3 +32,18 @@ A hung run is detected and released much sooner, and the item and its people are
 ## Out of scope
 - Resolving the PR #6 merge conflict (handled on GEP-35 itself once the run is released).
 - Changing the 10-minute check-in rule.
+
+## Addendum: unclear "call back" instructions (Bogdan, 2026-10-11)
+A second plausible cause of a stuck run: the agent finishes its work but never signals completion, because the run
+prompt (`server/src/routine.ts`, `buildPrompt`) doesn't make that obligatory. Step 4 says a status change "ends your run"
+and `runs/end` is for when the status should stay; step 5 just says "Stop". Gaps:
+- A **reviewer** whose item stays in "Review" (e.g. it only commented, or the PR was unmergeable) has no status to change,
+  and the review text mentions only approve (-> Done) / request changes (-> In progress), not `runs/end`.
+- Nothing says that merely writing a final chat message does NOT end the run; the run stays "working" until idle release.
+
+### Acceptance criteria
+5. The run prompt states explicitly: "Your run is only finished when you change the status or call `runs/end`.
+   Ending your turn without one leaves the item marked as being worked on. Always make one of those calls last."
+6. The Reviewing paragraph covers the third outcome: blocked/can't conclude (e.g. merge conflict) -> comment what is
+   needed (and assign/ask the author via a task or by moving it back), then `runs/end` if status stays.
+7. Unit test: prompt text for a plain run, a reviewing run and a dodCheck run each contain the "only finished when" line.
