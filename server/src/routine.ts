@@ -11,6 +11,7 @@ import { runRepo, type RunRepo } from './github.js';
 import { runConnectors } from './connectors.js';
 import { projectValues } from './projectValues.js';
 import { structuredPatch } from 'diff';
+import { FINISH_RULE, reviewBlockedRule } from './runPrompt.js';
 import { classifyRun, planIdleRetry, MAX_IDLE_RETRIES_PER_DAY, RUN_CHECKIN_MINUTES, RUN_IDLE_MINUTES } from './runSweep.js';
 import type { Actor } from './auth.js';
 
@@ -250,8 +251,8 @@ How to work (from Mustered):
 2. Read the task, including comments and links: ${readItem}
 3. Do what it asks with your tools and connectors, following the guidelines below. Mustered releases a run with no API activity for ${RUN_IDLE_MINUTES} minutes, so for work that will take longer, comment your progress along the way. If it's unclear or you're blocked, comment and say so instead of guessing.
 4. Comment with what you did (${addComment}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Mustered hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: ${endRun}
-5. Stop. Mustered starts a new run when something changes. While an unfinished item blocks your task, Mustered won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn || p.reviewing ? `
-Reviewing: a task in "${p.reviewColumnName}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
+5. ${FINISH_RULE} Then stop. Mustered starts a new run when something changes. While an unfinished item blocks your task, Mustered won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn || p.reviewing ? `
+Reviewing: a task in "${p.reviewColumnName}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work. ${reviewBlockedRule(p.working ?? project.columns[1], endRun)}` : ''}${p.dodCheck ? `
 
 ALL TASKS UNDER THIS ISSUE ARE DONE. This run is the definition-of-done check:
 - Check the result against the spec's acceptance criteria and the definition of done in the project guidelines.
