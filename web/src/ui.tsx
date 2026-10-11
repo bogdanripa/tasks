@@ -134,6 +134,10 @@ export function describe(e: Event, showItem: boolean): ReactNode {
       );
     case 'agent.run_failed':
       return <>couldn’t start a run{showItem && <> for {item}</>}: <span className="excerpt">{d.error}</span></>;
+    case 'agent.run_retried':
+      return <>run released after being idle; re-queued{showItem && <> for {item}</>}</>;
+    case 'agent.run_retry_capped':
+      return <>hit its daily limit of idle-run retries{showItem ? <> on {item}</> : ' on this item'}; needs a human</>;
     case 'agent.run_throttled':
       return <>hit its limit of {d.limit} runs an hour{showItem ? <> on {item}</> : ' on this item'}; updates are queued until {new Date(d.resumesAt).toLocaleTimeString()}</>;
     case 'project.created':
