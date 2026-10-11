@@ -3,7 +3,7 @@ import { sql } from './db.js';
 import { config } from './config.js';
 import { mintApiKey } from './auth.js';
 import { decrypt } from './crypto.js';
-import { recordEvent, requeueAgent, requireRepository, workingColumn } from './domain.js';
+import { addComment, recordEvent, requeueAgent, requireRepository, workingColumn } from './domain.js';
 import { compactReference } from './apidoc.js';
 import { BROWSER_TOOL_NAMES, inHouseFull, REPO_TOOL_NAMES, startInHouse, TASK_TOOL_NAMES } from './runtime.js';
 import { browserAvailable } from './browser.js';
@@ -11,6 +11,8 @@ import { runRepo, type RunRepo } from './github.js';
 import { runConnectors } from './connectors.js';
 import { projectValues } from './projectValues.js';
 import { structuredPatch } from 'diff';
+import { classifyRun, planIdleRetry, MAX_IDLE_RETRIES_PER_DAY, RUN_CHECKIN_MINUTES, RUN_IDLE_MINUTES } from './runSweep.js';
+import type { Actor } from './auth.js';
 
 const RUN_TOKEN_HOURS = 4;
 const MAX_RUNS_PER_ITEM_PER_HOUR = 10; // stops two agents from pinging each other forever
@@ -57,10 +59,6 @@ export type Pending = {
   actorKind: 'human' | 'agent';
 };
 
-/** A run that never calls Mustered within this long is released (usually the routine's network allowlist). */
-const RUN_CHECKIN_MINUTES = 10;
-/** A run with no API activity for this long is released (crashed or stuck). Real runs take minutes. */
-const RUN_IDLE_MINUTES = 120;
 /** The routine API accepts 65,536 characters of text; stay under it with room to spare. */
 const MAX_PAYLOAD = 60_000;
 const RECHECK_SECONDS = 30;
@@ -133,6 +131,8 @@ function describeChange(c: Record<string, any>, commentLimit = 4000): string {
       return `${d.ref} ${q(d.title ?? '')}, which this triggered, is done`;
     case 'stalled':
       return `Mustered's watchdog: this has been in "${d.status}" for ${d.idleMinutes} minutes with nothing happening (maybe your last run was cut off). Pick it up where you left off, or report what's blocking you and ask a human if you need one. If it's actually finished, set its status.`;
+    case 'retry':
+      return `your previous run on this item was released after ${RUN_IDLE_MINUTES} minutes without activity; start it again (read the item first to see what was already done)`;
     case 'all_tasks_done':
       return `all tasks under this issue are done (last: ${d.ref})`;
     default:
@@ -248,7 +248,7 @@ First, in your shell (the token acts as ${p.agentName} and expires ${p.expiresAt
 How to work (from Mustered):
 1. ${stepOne()}
 2. Read the task, including comments and links: ${readItem}
-3. Do what it asks with your tools and connectors, following the guidelines below. If it's unclear or you're blocked, comment and say so instead of guessing.
+3. Do what it asks with your tools and connectors, following the guidelines below. Mustered releases a run with no API activity for ${RUN_IDLE_MINUTES} minutes, so for work that will take longer, comment your progress along the way. If it's unclear or you're blocked, comment and say so instead of guessing.
 4. Comment with what you did (${addComment}), then set its status: "${done}" when finished${p.reviewColumn ? `, or "${p.reviewColumn}" when code needs review (Mustered hands it to a reviewer)` : ', or another column'}. Any status other than "${p.working ?? '-'}" ends your run. If the status should stay as it is (e.g. an issue now waiting on its tasks), end the run instead: ${endRun}
 5. Stop. Mustered starts a new run when something changes. While an unfinished item blocks your task, Mustered won't start runs for it; you're woken when the last blocker is done.${p.reviewColumn || p.reviewing ? `
 Reviewing: a task in "${p.reviewColumnName}" assigned to you is someone else's work to review. Check it against the spec, design and guidelines. Approve by moving it to "${done}"; otherwise comment exactly what to change and move it back to "${p.working ?? project.columns[1]}" (it returns to its author). Never approve your own work.` : ''}${p.dodCheck ? `
@@ -336,15 +336,16 @@ export async function releaseRun(run: Record<string, any>, error: string, revoke
 /** Release runs that never reached Mustered or went quiet, so the agent's queue moves on. Runs every worker tick. */
 export async function sweepStaleRuns() {
   const host = new URL(config.publicUrl).host;
-  const stale = await sql`
-    select r.id, r.agent_id, r.item_id, r.key_id, k.last_used_at from agent_runs r left join api_keys k on k.id = r.key_id
-    where r.status = 'fired' and r.finished_at is null and r.runtime = 'routine' and (
-      (k.last_used_at is null and r.created_at < now() - ${RUN_CHECKIN_MINUTES + ' minutes'}::interval) or
-      (k.last_used_at < now() - ${RUN_IDLE_MINUTES + ' minutes'}::interval))`;
-  for (const run of stale) {
-    if (run.lastUsedAt) {
-      await releaseRun(run, `no activity for ${RUN_IDLE_MINUTES / 60} hours, so Mustered released the agent; the run may have crashed`);
-    } else {
+  const open = await sql`
+    select r.id, r.agent_id, r.item_id, r.key_id, r.created_at, k.last_used_at, now() as db_now
+    from agent_runs r left join api_keys k on k.id = r.key_id
+    where r.status = 'fired' and r.finished_at is null and r.runtime = 'routine'`;
+  for (const run of open) {
+    const verdict = classifyRun({ createdAt: run.createdAt, lastUsedAt: run.lastUsedAt }, run.dbNow);
+    if (verdict === 'idle') {
+      const released = await releaseRun(run, `no activity for ${RUN_IDLE_MINUTES} minutes, so Mustered released the agent; the run may have crashed or hung`);
+      if (released) await retryAfterIdle(run).catch((e) => console.error(`idle retry for run ${run.id}:`, e));
+    } else if (verdict === 'never_reached') {
       // Keep its token: a session that merely started late can still do its work.
       await releaseRun(
         run,
@@ -353,6 +354,38 @@ export async function sweepStaleRuns() {
       );
     }
   }
+}
+
+/**
+ * A hung run was released: tell the item, and fire the same agent again if the item is still theirs. The
+ * queue skips the retry when the item has since closed, moved to Backlog or got blocked, so only
+ * assignment is checked here. Retries are capped per day so a run that always hangs can't loop.
+ */
+async function retryAfterIdle(run: Record<string, any>) {
+  if (!run.itemId) return;
+  const [item] = await sql`select org_id, project_id, ref, assignee_id from item_view where id = ${run.itemId}`;
+  if (!item) return;
+  const [{ retries }] = await sql`
+    select count(*)::int as retries from events
+    where item_id = ${run.itemId} and actor_id = ${run.agentId} and type = 'agent.run_retried' and created_at > now() - interval '1 day'`;
+  const [capped] = await sql`
+    select 1 from events
+    where item_id = ${run.itemId} and actor_id = ${run.agentId} and type = 'agent.run_retry_capped' and created_at > now() - interval '1 day'`;
+  const plan = planIdleRetry({ stillAssigned: item.assigneeId === run.agentId, retriesToday: retries, alreadyCapped: !!capped });
+  if (plan === 'none') return;
+  const [agent] = await sql`select id, name from accounts where id = ${run.agentId}`;
+  const actor: Actor = { id: agent.id, kind: 'agent', name: agent.name, email: null, orgId: item.orgId };
+  const base = { orgId: item.orgId, projectId: item.projectId, itemId: run.itemId, actorId: run.agentId };
+  if (plan === 'capped') {
+    await recordEvent({ ...base, type: 'agent.run_retry_capped', data: { agent: agent.name, limit: MAX_IDLE_RETRIES_PER_DAY } });
+    await addComment(actor, item.ref, `Run released after ${RUN_IDLE_MINUTES} minutes without activity, and this item has already been retried ${MAX_IDLE_RETRIES_PER_DAY} times in the last day. Not retrying again: a human needs to look at why ${agent.name}'s runs hang here.`);
+    return;
+  }
+  await addComment(actor, item.ref, `Run released after ${RUN_IDLE_MINUTES} minutes without activity; re-queued (retry ${retries + 1} of ${MAX_IDLE_RETRIES_PER_DAY} today).`);
+  const eventId = await recordEvent({ ...base, type: 'agent.run_retried', data: { agent: agent.name, attempt: retries + 1 } });
+  await sql`
+    insert into notifications (account_id, event_id, item_id, reason, delivery_status, next_attempt_at)
+    values (${run.agentId}, ${eventId}, ${run.itemId}, 'retry', 'pending', now())`;
 }
 
 /** An admin ends a run by hand (e.g. it's stuck), releasing the agent. */

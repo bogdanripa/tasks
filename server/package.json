@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../.env src/index.ts",
     "build": "tsc -p .",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
     "start": "node dist/index.js",
     "seed": "tsx scripts/seed.ts",
     "smoke": "tsx scripts/smoke.ts",
